@@ -10,7 +10,7 @@ Personal job application tracker with a Next.js frontend/backend and Supabase st
 - Filter by status, source, category, follow-up timing, and search text.
 - Estimate success probability from stage, timing, and your own history.
 - Sync data through a backend API into Supabase.
-- Restrict login to one email: `steven5115115@gmail.com`.
+- Restrict login to one email
 
 ## Tech Stack
 
