@@ -2,6 +2,8 @@
 
 Personal job application tracker with a Next.js frontend/backend and Supabase storage.
 
+Live site: https://jobtrack-fullstack.vercel.app
+
 ## What It Does
 
 - Track company, role, job link, source, category, job type, status, and dates.
