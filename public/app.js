@@ -126,6 +126,8 @@ function normalizeApplication(app) {
     coverLetter: app.coverLetter || "",
     cvFileName: app.cvFileName || "",
     cvFileType: app.cvFileType || "",
+    cvFileSize: app.cvFileSize || 0,
+    cvStoragePath: app.cvStoragePath || "",
     cvFileData: app.cvFileData || "",
     notes: app.notes || "",
     updatedAt: app.updatedAt || new Date().toISOString(),
@@ -307,7 +309,7 @@ function renderRows() {
 function materialTags(app) {
   const tags = [
     ["JD", Boolean(app.jobDescription)],
-    ["CV", Boolean(app.cvFileData || app.cvFileName)],
+    ["CV", Boolean(app.cvStoragePath || app.cvFileData || app.cvFileName)],
     ["CL", Boolean(app.coverLetter)],
   ];
   return `<div class="material-tags">${tags
@@ -467,8 +469,9 @@ function openDrawer(app = null) {
 
 function updateCvNote(app) {
   const name = app?.cvFileName;
+  const location = app?.cvStoragePath ? "cloud file" : app?.cvFileData ? "saved legacy file" : "saved file";
   els.cvFileNote.textContent = name
-    ? `Saved CV: ${name}. Choose another file to replace it.`
+    ? `Saved CV: ${name} (${location}). Choose another file to replace it.`
     : "No CV saved for this application.";
 }
 
@@ -485,14 +488,23 @@ async function upsertApplication(event) {
   let cvFields = {
     cvFileName: previous?.cvFileName || "",
     cvFileType: previous?.cvFileType || "",
+    cvFileSize: previous?.cvFileSize || 0,
+    cvStoragePath: previous?.cvStoragePath || "",
     cvFileData: previous?.cvFileData || "",
   };
   if (cvFile) {
-    if (cvFile.size > 2.5 * 1024 * 1024) {
-      alert("This CV is larger than 2.5 MB. Please upload a smaller PDF/DOC/TXT for browser storage.");
+    if (cvFile.size > 10 * 1024 * 1024) {
+      alert("This CV is larger than 10 MB. Please upload a smaller PDF/DOC/DOCX/TXT file.");
       return;
     }
-    cvFields = await readFileAsDataUrl(cvFile);
+    try {
+      updateSyncStatus("Uploading CV...");
+      cvFields = await uploadCvFile(id, cvFile, previous?.cvStoragePath || "");
+    } catch (error) {
+      alert(`Could not upload CV: ${error.message}`);
+      updateSyncStatus(`CV upload error: ${error.message}`);
+      return;
+    }
   }
   const app = normalizeApplication({
     id,
@@ -537,8 +549,35 @@ function readFileAsDataUrl(file) {
   });
 }
 
-function deleteCurrent() {
+async function uploadCvFile(appId, file, previousPath = "") {
+  const headers = await authHeaders(false);
+  if (!headers) throw new Error("Please sign in first.");
+  const formData = new FormData();
+  formData.append("appId", appId);
+  formData.append("file", file);
+  formData.append("previousPath", previousPath);
+
+  const response = await fetch("/api/cv", {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || `Upload failed: ${response.status}`);
+
+  return {
+    cvFileName: payload.cvFileName,
+    cvFileType: payload.cvFileType,
+    cvFileSize: payload.cvFileSize || file.size,
+    cvStoragePath: payload.cvStoragePath,
+    cvFileData: "",
+  };
+}
+
+async function deleteCurrent() {
   const id = document.querySelector("#recordId").value;
+  const previous = applications.find((app) => app.id === id);
+  if (previous?.cvStoragePath) await deleteCvFile(previous.cvStoragePath);
   applications = applications.filter((app) => app.id !== id);
   saveApplications();
   deleteFromCloud(id);
@@ -577,9 +616,13 @@ function openDetails(app) {
   els.detailsSubTitle.textContent = `${app.role} | ${app.category || "Other"} | ${app.status} | ${probabilityFor(app)}% probability`;
   els.detailsJd.textContent = app.jobDescription || "No job description saved yet.";
   els.detailsCl.textContent = app.coverLetter || "No cover letter text saved yet.";
-  els.detailsCv.innerHTML = app.cvFileData
-    ? `<a class="primary" href="${app.cvFileData}" download="${escapeHtml(app.cvFileName || "cv")}">Download ${escapeHtml(app.cvFileName || "CV")}</a>`
-    : `<p class="muted">No CV file saved yet.</p>`;
+  if (app.cvStoragePath) {
+    els.detailsCv.innerHTML = `<button class="primary" type="button" data-download-cv="${escapeHtml(app.id)}">Download ${escapeHtml(app.cvFileName || "CV")}</button>`;
+  } else if (app.cvFileData) {
+    els.detailsCv.innerHTML = `<a class="primary" href="${app.cvFileData}" download="${escapeHtml(app.cvFileName || "cv")}">Download ${escapeHtml(app.cvFileName || "CV")}</a>`;
+  } else {
+    els.detailsCv.innerHTML = `<p class="muted">No CV file saved yet.</p>`;
+  }
   els.detailsModal.classList.remove("hidden");
   els.detailsBackdrop.classList.remove("hidden");
 }
@@ -638,14 +681,15 @@ function updateSyncStatus(message) {
   els.syncStatus.textContent = message;
 }
 
-async function authHeaders() {
+async function authHeaders(includeJson = true) {
   if (!supabaseClient) return null;
   const { data, error } = await supabaseClient.auth.getSession();
   if (error || !data.session?.access_token) return null;
-  return {
+  const headers = {
     Authorization: `Bearer ${data.session.access_token}`,
-    "Content-Type": "application/json",
   };
+  if (includeJson) headers["Content-Type"] = "application/json";
+  return headers;
 }
 
 async function apiRequest(path, options = {}) {
@@ -719,6 +763,26 @@ async function deleteFromCloud(id) {
     await apiRequest(`/api/applications?id=${encodeURIComponent(id)}`, { method: "DELETE" });
   } catch (error) {
     updateSyncStatus(`Delete sync error: ${error.message}`);
+  }
+}
+
+async function downloadCvFile(appId) {
+  const app = applications.find((item) => item.id === appId);
+  if (!app?.cvStoragePath) return;
+  try {
+    const data = await apiRequest(`/api/cv?path=${encodeURIComponent(app.cvStoragePath)}`);
+    window.location.href = data.signedUrl;
+  } catch (error) {
+    alert(`Could not download CV: ${error.message}`);
+  }
+}
+
+async function deleteCvFile(path) {
+  if (!path || !supabaseClient || !currentUser) return;
+  try {
+    await apiRequest(`/api/cv?path=${encodeURIComponent(path)}`, { method: "DELETE" });
+  } catch (error) {
+    updateSyncStatus(`CV delete error: ${error.message}`);
   }
 }
 
@@ -811,6 +875,10 @@ els.form.addEventListener("submit", upsertApplication);
 els.deleteBtn.addEventListener("click", deleteCurrent);
 document.querySelector("#closeDetailsBtn").addEventListener("click", closeDetails);
 els.detailsBackdrop.addEventListener("click", closeDetails);
+els.detailsCv.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-download-cv]");
+  if (button) downloadCvFile(button.dataset.downloadCv);
+});
 document.querySelector("#openSyncBtn").addEventListener("click", openSyncModal);
 document.querySelector("#closeSyncBtn").addEventListener("click", closeSyncModal);
 document.querySelector("#clearSyncBtn").addEventListener("click", clearSyncSettings);
