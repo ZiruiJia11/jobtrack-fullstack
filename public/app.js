@@ -770,7 +770,9 @@ async function downloadCvFile(appId) {
   const app = applications.find((item) => item.id === appId);
   if (!app?.cvStoragePath) return;
   try {
-    const data = await apiRequest(`/api/cv?path=${encodeURIComponent(app.cvStoragePath)}`);
+    const data = await apiRequest(
+      `/api/cv?path=${encodeURIComponent(app.cvStoragePath)}&name=${encodeURIComponent(app.cvFileName || "cv")}`,
+    );
     window.location.href = data.signedUrl;
   } catch (error) {
     alert(`Could not download CV: ${error.message}`);

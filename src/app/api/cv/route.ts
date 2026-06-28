@@ -85,12 +85,15 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const path = searchParams.get("path") || "";
+  const downloadName = safeFileName(searchParams.get("name") || "cv");
   if (!path || !ownsPath(user.id, path)) {
     return NextResponse.json({ error: "File not found" }, { status: 404 });
   }
 
   await ensureBucket();
-  const { data, error } = await getSupabaseAdmin().storage.from(BUCKET).createSignedUrl(path, 60);
+  const { data, error } = await getSupabaseAdmin().storage.from(BUCKET).createSignedUrl(path, 60, {
+    download: downloadName,
+  });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   return NextResponse.json({ signedUrl: data.signedUrl });
