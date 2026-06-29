@@ -12,7 +12,28 @@ const STATUSES = [
 ];
 
 const SOURCES = ["Company Website", "LinkedIn", "Referral", "Recruiter", "Indeed", "Email", "Other"];
-const CATEGORIES = ["Backend", "Frontend", "Data AI", "Technical", "Service Desk", "Other"];
+const CATEGORIES = [
+  "Software Engineer",
+  "Full-stack",
+  "Backend",
+  "Frontend",
+  "Mobile",
+  "Data Analyst",
+  "Data Engineer",
+  "Data AI",
+  "ML / AI Engineer",
+  "Business Analyst",
+  "QA / Testing",
+  "DevOps",
+  "Cloud Engineer",
+  "Cybersecurity",
+  "Technical",
+  "Technical Support",
+  "Service Desk",
+  "IT Support",
+  "Product / Project",
+  "Other",
+];
 const JOB_TYPES = ["Full-time", "Part-time", "Internship", "Contract", "Remote", "Hybrid"];
 const STORAGE_KEY = "jobtrack.applications.v2";
 const LEGACY_STORAGE_KEY = "jobtrack.applications.v1";
