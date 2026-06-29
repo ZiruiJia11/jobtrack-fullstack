@@ -452,10 +452,22 @@ function renderTimeline() {
       ? `<p class="muted">No timeline yet.</p>`
       : entries
           .map(([month, count]) => {
-            const height = Math.max(12, (count / max) * 130);
-            return `<div class="month-bar" title="${month}: ${count}" style="height:${height}px"><span>${month.slice(5)}</span></div>`;
+            const height = Math.max(16, (count / max) * 104);
+            return `
+              <div class="pace-item" title="${month}: ${count} applications">
+                <strong>${count}</strong>
+                <div class="month-bar" style="height:${height}px"></div>
+                <span>${monthLabel(month)}</span>
+              </div>
+            `;
           })
           .join("");
+}
+
+function monthLabel(month) {
+  const [year, rawMonth] = month.split("-");
+  const date = new Date(Number(year), Number(rawMonth) - 1, 1);
+  return date.toLocaleDateString("en", { month: "short" });
 }
 
 function renderFilters() {

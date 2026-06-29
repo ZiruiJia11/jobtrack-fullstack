@@ -142,9 +142,9 @@ const pageMarkup = String.raw`
             <ul class="due-list stale-list" id="staleList"></ul>
           </section>
           <section class="card">
-            <div class="card-title">Timeline signal</div>
+            <div class="card-title">Application pace</div>
             <div class="mini-chart" id="timelineChart" aria-label="Applications over time"></div>
-            <p class="muted">Grouped by applied month so you can see whether momentum is improving.</p>
+            <p class="muted">Applications submitted by month. Use it to see whether your weekly search rhythm is staying steady.</p>
           </section>
         </aside>
       </div>

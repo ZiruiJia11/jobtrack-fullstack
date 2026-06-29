@@ -624,30 +624,41 @@ tr:hover td {
 }
 
 .mini-chart {
-  margin-top: 18px;
-  height: 150px;
-  display: flex;
+  margin-top: 14px;
+  min-height: 158px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(34px, 1fr));
   align-items: end;
-  gap: 9px;
-  border-bottom: 1px solid var(--line);
-  padding-top: 14px;
+  gap: 10px;
+  padding: 10px 0 2px;
+}
+
+.pace-item {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: 20px 112px 18px;
+  align-items: end;
+  justify-items: center;
+  gap: 5px;
+}
+
+.pace-item strong {
+  color: var(--navy);
+  font-size: 12px;
+  line-height: 1;
 }
 
 .month-bar {
-  flex: 1;
-  min-width: 16px;
+  width: min(28px, 80%);
   background: linear-gradient(180deg, #79aefc, var(--blue));
-  border-radius: 6px 6px 0 0;
-  position: relative;
+  border-radius: 7px 7px 4px 4px;
 }
 
-.month-bar span {
-  position: absolute;
-  bottom: -22px;
-  left: 50%;
-  transform: translateX(-50%);
+.pace-item span {
   color: var(--muted);
   font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .drawer-backdrop,
