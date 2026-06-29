@@ -67,6 +67,7 @@ const els = {
   drawerTitle: document.querySelector("#drawerTitle"),
   deleteBtn: document.querySelector("#deleteBtn"),
   cvFileNote: document.querySelector("#cvFileNote"),
+  clFileNote: document.querySelector("#clFileNote"),
   detailsModal: document.querySelector("#detailsModal"),
   detailsBackdrop: document.querySelector("#detailsBackdrop"),
   detailsTitle: document.querySelector("#detailsTitle"),
@@ -74,6 +75,12 @@ const els = {
   detailsJd: document.querySelector("#detailsJd"),
   detailsCl: document.querySelector("#detailsCl"),
   detailsCv: document.querySelector("#detailsCv"),
+  detailsClFile: document.querySelector("#detailsClFile"),
+  attentionCount: document.querySelector("#attentionCount"),
+  activeCount: document.querySelector("#activeCount"),
+  interviewCount: document.querySelector("#interviewCount"),
+  staleCount: document.querySelector("#staleCount"),
+  staleList: document.querySelector("#staleList"),
   syncStatus: document.querySelector("#syncStatus"),
   syncModal: document.querySelector("#syncModal"),
   syncBackdrop: document.querySelector("#syncBackdrop"),
@@ -124,6 +131,11 @@ function normalizeApplication(app) {
     status: app.status || "Applied",
     jobDescription: app.jobDescription || "",
     coverLetter: app.coverLetter || "",
+    clFileName: app.clFileName || "",
+    clFileType: app.clFileType || "",
+    clFileSize: app.clFileSize || 0,
+    clStoragePath: app.clStoragePath || "",
+    clFileData: app.clFileData || "",
     cvFileName: app.cvFileName || "",
     cvFileType: app.cvFileType || "",
     cvFileSize: app.cvFileSize || 0,
@@ -244,6 +256,7 @@ function filteredApplications() {
       follow === "all" ||
       (follow === "due" && due !== null && due <= 0) ||
       (follow === "week" && due !== null && due >= 0 && due <= 7) ||
+      (follow === "stale" && isStaleApplication(app)) ||
       (follow === "none" && !app.followUpDate);
     return (
       (status === "all" || app.status === status) &&
@@ -310,7 +323,7 @@ function materialTags(app) {
   const tags = [
     ["JD", Boolean(app.jobDescription)],
     ["CV", Boolean(app.cvStoragePath || app.cvFileData || app.cvFileName)],
-    ["CL", Boolean(app.coverLetter)],
+    ["CL", Boolean(app.coverLetter || app.clStoragePath || app.clFileData || app.clFileName)],
   ];
   return `<div class="material-tags">${tags
     .map(([label, ready]) => `<span class="material-tag ${ready ? "ready" : ""}">${label}</span>`)
@@ -322,6 +335,11 @@ function renderStats() {
   const interviews = applications.filter((app) => ["Interview", "Take-home", "Final"].includes(app.status)).length;
   const offers = applications.filter((app) => app.status === "Offer").length;
   const rejected = applications.filter((app) => app.status === "Rejected").length;
+  const stale = staleApplications();
+  const dueNow = applications.filter((app) => {
+    const days = daysUntil(app.followUpDate);
+    return days !== null && days <= 0 && !["Offer", "Rejected", "Withdrawn"].includes(app.status);
+  }).length;
   els.quickStats.innerHTML = `
     <div class="stat-row"><span>Total</span><strong>${applications.length}</strong></div>
     <div class="stat-row"><span>Open</span><strong>${open}</strong></div>
@@ -329,6 +347,9 @@ function renderStats() {
     <div class="stat-row"><span>Offers</span><strong>${offers}</strong></div>
     <div class="stat-row"><span>Rejected</span><strong>${rejected}</strong></div>
   `;
+  if (els.attentionCount) els.attentionCount.textContent = `${stale.length + dueNow}`;
+  if (els.activeCount) els.activeCount.textContent = `${open}`;
+  if (els.interviewCount) els.interviewCount.textContent = `${interviews}`;
 
   const active = applications.filter((app) => !["Offer", "Rejected", "Withdrawn"].includes(app.status));
   const avg = active.length ? Math.round(active.reduce((sum, app) => sum + probabilityFor(app), 0) / active.length) : 0;
@@ -384,6 +405,39 @@ function renderDueList() {
           .join("");
 }
 
+function isStaleApplication(app) {
+  if (!app.appliedDate || ["Offer", "Rejected", "Withdrawn"].includes(app.status)) return false;
+  if (app.screenDate || app.interviewDate || app.finalDate || app.decisionDate) return false;
+  return daysBetween(app.appliedDate) >= 30;
+}
+
+function staleApplications() {
+  return applications
+    .filter(isStaleApplication)
+    .sort((a, b) => daysBetween(b.appliedDate) - daysBetween(a.appliedDate));
+}
+
+function renderStaleList() {
+  if (!els.staleList || !els.staleCount) return;
+  const allStale = staleApplications();
+  const stale = allStale.slice(0, 6);
+  els.staleCount.textContent = `${allStale.length}`;
+  els.staleList.innerHTML =
+    stale.length === 0
+      ? `<li class="muted">No applications have gone quiet for 30+ days.</li>`
+      : stale
+          .map((app) => {
+            const age = daysBetween(app.appliedDate);
+            return `
+              <li>
+                <span>${escapeHtml(app.company)} - ${escapeHtml(app.role)}<small>${age} days since applied</small></span>
+                <button class="text-button" type="button" data-edit="${app.id}">Plan follow-up</button>
+              </li>
+            `;
+          })
+          .join("");
+}
+
 function renderTimeline() {
   const buckets = new Map();
   applications.forEach((app) => {
@@ -424,6 +478,7 @@ function renderAll() {
   renderStats();
   renderStatusChart();
   renderDueList();
+  renderStaleList();
   renderTimeline();
 }
 
@@ -462,6 +517,7 @@ function openDrawer(app = null) {
     document.querySelector("#jobType").value = "Full-time";
   }
   updateCvNote(app);
+  updateClNote(app);
 
   els.drawer.classList.remove("hidden");
   els.drawerBackdrop.classList.remove("hidden");
@@ -475,6 +531,14 @@ function updateCvNote(app) {
     : "No CV saved for this application.";
 }
 
+function updateClNote(app) {
+  const name = app?.clFileName;
+  const location = app?.clStoragePath ? "cloud file" : app?.clFileData ? "saved legacy file" : "saved file";
+  els.clFileNote.textContent = name
+    ? `Saved CL file: ${name} (${location}). Choose another file to replace it.`
+    : "No cover letter file saved for this application.";
+}
+
 function closeDrawer() {
   els.drawer.classList.add("hidden");
   els.drawerBackdrop.classList.add("hidden");
@@ -485,12 +549,20 @@ async function upsertApplication(event) {
   const id = document.querySelector("#recordId").value || crypto.randomUUID();
   const previous = applications.find((item) => item.id === id);
   const cvFile = document.querySelector("#cvFile").files[0];
+  const clFile = document.querySelector("#clFile").files[0];
   let cvFields = {
     cvFileName: previous?.cvFileName || "",
     cvFileType: previous?.cvFileType || "",
     cvFileSize: previous?.cvFileSize || 0,
     cvStoragePath: previous?.cvStoragePath || "",
     cvFileData: previous?.cvFileData || "",
+  };
+  let clFields = {
+    clFileName: previous?.clFileName || "",
+    clFileType: previous?.clFileType || "",
+    clFileSize: previous?.clFileSize || 0,
+    clStoragePath: previous?.clStoragePath || "",
+    clFileData: previous?.clFileData || "",
   };
   if (cvFile) {
     if (cvFile.size > 10 * 1024 * 1024) {
@@ -499,10 +571,24 @@ async function upsertApplication(event) {
     }
     try {
       updateSyncStatus("Uploading CV...");
-      cvFields = await uploadCvFile(id, cvFile, previous?.cvStoragePath || "");
+      cvFields = await uploadMaterialFile(id, cvFile, previous?.cvStoragePath || "", "CV");
     } catch (error) {
       alert(`Could not upload CV: ${error.message}`);
       updateSyncStatus(`CV upload error: ${error.message}`);
+      return;
+    }
+  }
+  if (clFile) {
+    if (clFile.size > 10 * 1024 * 1024) {
+      alert("This cover letter file is larger than 10 MB. Please upload a smaller PDF/DOC/DOCX/TXT file.");
+      return;
+    }
+    try {
+      updateSyncStatus("Uploading cover letter file...");
+      clFields = mapUploadedFile(await uploadMaterialFile(id, clFile, previous?.clStoragePath || "", "CL"), "cl");
+    } catch (error) {
+      alert(`Could not upload cover letter file: ${error.message}`);
+      updateSyncStatus(`CL upload error: ${error.message}`);
       return;
     }
   }
@@ -523,6 +609,7 @@ async function upsertApplication(event) {
     status: document.querySelector("#status").value,
     jobDescription: document.querySelector("#jobDescription").value.trim(),
     coverLetter: document.querySelector("#coverLetter").value.trim(),
+    ...clFields,
     ...cvFields,
     notes: document.querySelector("#notes").value.trim(),
     updatedAt: new Date().toISOString(),
@@ -549,7 +636,7 @@ function readFileAsDataUrl(file) {
   });
 }
 
-async function uploadCvFile(appId, file, previousPath = "") {
+async function uploadMaterialFile(appId, file, previousPath = "", label = "file") {
   const headers = await authHeaders(false);
   if (!headers) throw new Error("Please sign in first.");
   const formData = new FormData();
@@ -574,10 +661,21 @@ async function uploadCvFile(appId, file, previousPath = "") {
   };
 }
 
+function mapUploadedFile(uploaded, prefix) {
+  return {
+    [`${prefix}FileName`]: uploaded.cvFileName,
+    [`${prefix}FileType`]: uploaded.cvFileType,
+    [`${prefix}FileSize`]: uploaded.cvFileSize,
+    [`${prefix}StoragePath`]: uploaded.cvStoragePath,
+    [`${prefix}FileData`]: "",
+  };
+}
+
 async function deleteCurrent() {
   const id = document.querySelector("#recordId").value;
   const previous = applications.find((app) => app.id === id);
   if (previous?.cvStoragePath) await deleteCvFile(previous.cvStoragePath);
+  if (previous?.clStoragePath) await deleteCvFile(previous.clStoragePath);
   applications = applications.filter((app) => app.id !== id);
   saveApplications();
   deleteFromCloud(id);
@@ -616,6 +714,13 @@ function openDetails(app) {
   els.detailsSubTitle.textContent = `${app.role} | ${app.category || "Other"} | ${app.status} | ${probabilityFor(app)}% probability`;
   els.detailsJd.textContent = app.jobDescription || "No job description saved yet.";
   els.detailsCl.textContent = app.coverLetter || "No cover letter text saved yet.";
+  if (app.clStoragePath) {
+    els.detailsClFile.innerHTML = `<button class="secondary" type="button" data-download-cl="${escapeHtml(app.id)}">Download ${escapeHtml(app.clFileName || "cover letter")}</button>`;
+  } else if (app.clFileData) {
+    els.detailsClFile.innerHTML = `<a class="secondary" href="${app.clFileData}" download="${escapeHtml(app.clFileName || "cover-letter")}">Download ${escapeHtml(app.clFileName || "cover letter")}</a>`;
+  } else {
+    els.detailsClFile.innerHTML = "";
+  }
   if (app.cvStoragePath) {
     els.detailsCv.innerHTML = `<button class="primary" type="button" data-download-cv="${escapeHtml(app.id)}">Download ${escapeHtml(app.cvFileName || "CV")}</button>`;
   } else if (app.cvFileData) {
@@ -779,6 +884,19 @@ async function downloadCvFile(appId) {
   }
 }
 
+async function downloadClFile(appId) {
+  const app = applications.find((item) => item.id === appId);
+  if (!app?.clStoragePath) return;
+  try {
+    const data = await apiRequest(
+      `/api/cv?path=${encodeURIComponent(app.clStoragePath)}&name=${encodeURIComponent(app.clFileName || "cover-letter")}`,
+    );
+    window.location.href = data.signedUrl;
+  } catch (error) {
+    alert(`Could not download cover letter file: ${error.message}`);
+  }
+}
+
 async function deleteCvFile(path) {
   if (!path || !supabaseClient || !currentUser) return;
   try {
@@ -881,6 +999,18 @@ els.detailsCv.addEventListener("click", (event) => {
   const button = event.target.closest("[data-download-cv]");
   if (button) downloadCvFile(button.dataset.downloadCv);
 });
+els.detailsClFile.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-download-cl]");
+  if (button) downloadClFile(button.dataset.downloadCl);
+});
+if (els.staleList) {
+  els.staleList.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-edit]");
+    if (!button) return;
+    const app = applications.find((item) => item.id === button.dataset.edit);
+    if (app) openDrawer(app);
+  });
+}
 document.querySelector("#openSyncBtn").addEventListener("click", openSyncModal);
 document.querySelector("#closeSyncBtn").addEventListener("click", closeSyncModal);
 document.querySelector("#clearSyncBtn").addEventListener("click", clearSyncSettings);

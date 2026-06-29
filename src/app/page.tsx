@@ -42,8 +42,8 @@ const pageMarkup = String.raw`
     <main class="main" id="dashboard">
       <header class="topbar">
         <div>
-          <h1>Applications</h1>
-          <p>Track jobs, links, dates, follow-ups, JD, CV, cover letters, and success probability.</p>
+          <h1>Job search command center</h1>
+          <p>Plan the next action, keep materials close, and spot quiet applications before they disappear.</p>
         </div>
         <div class="topbar-actions">
           <span class="user-chip" id="userChip">Not signed in</span>
@@ -67,10 +67,31 @@ const pageMarkup = String.raw`
             <option value="all">All dates</option>
             <option value="due">Due now</option>
             <option value="week">Next 7 days</option>
+            <option value="stale">30+ days quiet</option>
             <option value="none">No follow-up</option>
           </select>
         </label>
         <label class="search-field">Search<input id="searchInput" type="search" placeholder="Company, role, notes..." /></label>
+      </section>
+
+      <section class="action-board" aria-label="Application action summary">
+        <div class="action-card action-card-primary">
+          <div>
+            <span class="action-label">Needs attention</span>
+            <strong id="attentionCount">0</strong>
+          </div>
+          <p>Follow-ups due now or applications quiet for 30+ days.</p>
+        </div>
+        <div class="action-card">
+          <span class="action-label">Active pipeline</span>
+          <strong id="activeCount">0</strong>
+          <p>Open roles still worth tracking.</p>
+        </div>
+        <div class="action-card">
+          <span class="action-label">Interview motion</span>
+          <strong id="interviewCount">0</strong>
+          <p>Screening, interview, take-home, or final.</p>
+        </div>
       </section>
 
       <div class="content-grid">
@@ -115,6 +136,11 @@ const pageMarkup = String.raw`
             <div class="card-title row-between">Follow-ups due soon <span id="dueCount"></span></div>
             <ul class="due-list" id="dueList"></ul>
           </section>
+          <section class="card stale-card" id="staleApplications">
+            <div class="card-title row-between">30+ days quiet <span id="staleCount"></span></div>
+            <p class="muted">Applications with no clear progress for a month. Good candidates for a follow-up, refresh, or archive.</p>
+            <ul class="due-list stale-list" id="staleList"></ul>
+          </section>
           <section class="card">
             <div class="card-title">Timeline signal</div>
             <div class="mini-chart" id="timelineChart" aria-label="Applications over time"></div>
@@ -126,7 +152,7 @@ const pageMarkup = String.raw`
   </div>
 
   <div class="drawer-backdrop hidden" id="drawerBackdrop"></div>
-  <aside class="drawer hidden" aria-label="Add or edit application" id="drawer">
+  <aside class="drawer application-modal hidden" aria-label="Add or edit application" id="drawer">
     <div class="drawer-head">
       <h2 id="drawerTitle">Add application</h2>
       <button class="icon-button" id="closeFormBtn" type="button" aria-label="Close">&times;</button>
@@ -160,6 +186,8 @@ const pageMarkup = String.raw`
       <label>CV file<input id="cvFile" type="file" accept=".pdf,.doc,.docx,.txt" /></label>
       <div class="file-note" id="cvFileNote">No CV saved for this application.</div>
       <label>Cover letter text<textarea id="coverLetter" rows="6" placeholder="Paste or draft your CL text here..."></textarea></label>
+      <label>Cover letter file<input id="clFile" type="file" accept=".pdf,.doc,.docx,.txt" /></label>
+      <div class="file-note" id="clFileNote">No cover letter file saved for this application.</div>
       <label>Notes<textarea id="notes" rows="4" placeholder="Contact, salary range, next action..."></textarea></label>
       <div class="drawer-actions">
         <button class="secondary" id="deleteBtn" type="button">Delete</button>
@@ -184,6 +212,7 @@ const pageMarkup = String.raw`
     <div class="detail-section">
       <h3>Cover letter</h3>
       <div class="detail-text" id="detailsCl"></div>
+      <div id="detailsClFile"></div>
     </div>
     <div class="detail-section">
       <h3>Saved CV</h3>
