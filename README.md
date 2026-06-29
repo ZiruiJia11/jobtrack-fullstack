@@ -2,7 +2,7 @@
 
 Personal job application tracker with a Next.js frontend/backend and Supabase storage.
 
-Live site: https://jobtrack-fullstack.vercel.app
+Live site: https://jobtrack-fullstack-ashy.vercel.app/
 
 ## What It Does
 
