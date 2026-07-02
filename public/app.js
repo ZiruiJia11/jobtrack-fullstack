@@ -134,7 +134,7 @@ function normalizeApplication(app) {
     cvFileData: app.cvFileData || "",
     notes: app.notes || "",
     updatedAt: app.updatedAt || new Date().toISOString(),
-    isExample: Boolean(app.isExample),
+    isExample: app.isExample === true,
   };
 }
 
@@ -872,7 +872,7 @@ function mergeApplications(localApps, cloudApps) {
 }
 
 function withoutExamples(items) {
-  return (items || []).filter((app) => !app.isExample);
+  return (items || []).filter((app) => app.isExample !== true);
 }
 
 async function syncAllToBackend() {
