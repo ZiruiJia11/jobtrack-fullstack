@@ -182,7 +182,12 @@ function saveApplications({ skipCloud = false } = {}) {
 
 function loadSupabaseConfig() {
   try {
-    return JSON.parse(localStorage.getItem(SUPABASE_CONFIG_KEY));
+    const config = JSON.parse(localStorage.getItem(SUPABASE_CONFIG_KEY));
+    if (!config?.url || !config?.anonKey) {
+      localStorage.removeItem(SUPABASE_CONFIG_KEY);
+      return null;
+    }
+    return config;
   } catch {
     return null;
   }
@@ -741,15 +746,30 @@ function closeDetails() {
   els.detailsBackdrop.classList.add("hidden");
 }
 
+async function ensureSupabaseSdk() {
+  if (window.supabase) return true;
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  if (window.supabase) return true;
+  return new Promise((resolve) => {
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";
+    script.onload = () => resolve(Boolean(window.supabase));
+    script.onerror = () => resolve(false);
+    document.head.appendChild(script);
+  });
+}
+
 function createSupabaseClient() {
   if (!supabaseConfig?.url || !supabaseConfig?.anonKey || !window.supabase) return null;
   return window.supabase.createClient(supabaseConfig.url, supabaseConfig.anonKey);
 }
 
 async function initSupabase() {
+  supabaseConfig = loadSupabaseConfig() || DEFAULT_SUPABASE_CONFIG;
+  await ensureSupabaseSdk();
   supabaseClient = createSupabaseClient();
   if (!supabaseClient) {
-    updateSyncStatus("Backend env missing");
+    updateSyncStatus("Supabase config missing");
     setAuthView(false);
     return;
   }
@@ -932,9 +952,10 @@ function closeSyncModal() {
 
 async function saveSyncSettings(event) {
   event.preventDefault();
+  await ensureSupabaseSdk();
   supabaseClient = createSupabaseClient();
   if (!supabaseClient) {
-    updateSyncStatus("Backend env missing");
+    updateSyncStatus("Supabase config missing");
     return;
   }
   els.syncFormNote.textContent = `Connection ready for ${LOGIN_EMAIL}.`;
@@ -945,9 +966,12 @@ async function saveSyncSettings(event) {
 async function sendLoginLink(event) {
   event.preventDefault();
   if (!supabaseClient) {
-    els.loginNote.textContent = "Supabase is not configured. Open sync setup first.";
-    els.loginNote.classList.add("warning");
-    return;
+    await initSupabase();
+    if (!supabaseClient) {
+      els.loginNote.textContent = "Supabase connection is not ready. Refresh the page once and try again.";
+      els.loginNote.classList.add("warning");
+      return;
+    }
   }
   const email = LOGIN_EMAIL;
   const password = els.loginPassword.value;

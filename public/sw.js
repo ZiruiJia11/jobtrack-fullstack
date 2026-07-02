@@ -1,4 +1,4 @@
-const CACHE_NAME = "jobtrack-shell-v1";
+const CACHE_NAME = "jobtrack-shell-v2";
 const SHELL_ASSETS = ["/", "/styles.css", "/app.js", "/icon.svg", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
