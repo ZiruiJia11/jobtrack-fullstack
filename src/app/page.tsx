@@ -51,7 +51,6 @@ const pageMarkup = String.raw`
             Import
             <input id="importInput" type="file" accept="application/json" hidden />
           </label>
-          <button class="secondary" id="seedBtn" type="button">Load examples</button>
           <button class="secondary" id="signOutBtn" type="button">Sign out</button>
           <button class="primary" id="openFormBtn" type="button">+ Add application</button>
         </div>

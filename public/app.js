@@ -46,14 +46,6 @@ const DEFAULT_SUPABASE_CONFIG = {
   anonKey: RUNTIME_CONFIG.supabaseAnonKey || "",
 };
 
-const sampleApplications = [
-  sample("Canva", "Product Designer", "Data AI", "Interview", "Company Website", "2026-06-08", "2026-06-24"),
-  sample("Xero", "Frontend Developer", "Frontend", "Applied", "LinkedIn", "2026-06-15", "2026-06-25"),
-  sample("Atlassian", "Software Engineer", "Backend", "Final", "Referral", "2026-05-28", "2026-06-23"),
-  sample("Shopify", "Developer", "Other", "Rejected", "Company Website", "2026-05-18", ""),
-  sample("Datadog", "Product Analyst", "Data AI", "Screening", "Recruiter", "2026-06-01", "2026-06-27"),
-];
-
 let applications = loadApplications();
 let supabaseConfig = loadSupabaseConfig() || DEFAULT_SUPABASE_CONFIG;
 let supabaseClient = null;
@@ -112,28 +104,6 @@ const els = {
   syncFormNote: document.querySelector("#syncFormNote"),
 };
 
-function sample(company, role, category, status, source, appliedDate, followUpDate) {
-  return normalizeApplication({
-    id: crypto.randomUUID(),
-    company,
-    role,
-    link: "https://example.com/jobs",
-    source,
-    category,
-    jobType: "Full-time",
-    appliedDate,
-    followUpDate,
-    screenDate: status === "Applied" || status === "Rejected" ? "" : "2026-06-12",
-    interviewDate: ["Interview", "Final"].includes(status) ? "2026-06-20" : "",
-    finalDate: status === "Final" ? "2026-06-22" : "",
-    decisionDate: status === "Rejected" ? "2026-06-03" : "",
-    status,
-    jobDescription: `${role} role with responsibilities worth saving for interview prep.`,
-    coverLetter: status === "Final" ? "Thank you for the conversation. I enjoyed learning more about the team." : "",
-    notes: "Example row. Replace it with your real application.",
-  });
-}
-
 function normalizeApplication(app) {
   return {
     id: app.id || crypto.randomUUID(),
@@ -164,6 +134,7 @@ function normalizeApplication(app) {
     cvFileData: app.cvFileData || "",
     notes: app.notes || "",
     updatedAt: app.updatedAt || new Date().toISOString(),
+    isExample: Boolean(app.isExample),
   };
 }
 
@@ -198,14 +169,14 @@ function loadApplications() {
   try {
     const current = localStorage.getItem(STORAGE_KEY);
     const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
-    return normalizeApplications(JSON.parse(current || legacy) || sampleApplications);
+    return normalizeApplications(JSON.parse(current || legacy) || []);
   } catch {
-    return normalizeApplications(sampleApplications);
+    return [];
   }
 }
 
 function saveApplications({ skipCloud = false } = {}) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(applications));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(withoutExamples(applications)));
   if (!skipCloud) syncAllToBackend();
 }
 
@@ -362,7 +333,7 @@ function renderStats() {
     return days !== null && days <= 0 && !["Offer", "Rejected", "Withdrawn"].includes(app.status);
   }).length;
   els.quickStats.innerHTML = `
-    <div class="stat-row"><span>Total</span><strong>${applications.length}</strong></div>
+    <div class="stat-row"><span>Total</span><strong>${realApps.length}</strong></div>
     <div class="stat-row"><span>Open</span><strong>${open}</strong></div>
     <div class="stat-row"><span>Interviews</span><strong>${interviews}</strong></div>
     <div class="stat-row"><span>Offers</span><strong>${offers}</strong></div>
@@ -865,13 +836,13 @@ async function loadFromBackend() {
   );
   applications = mergeApplications(applications, cloudApps);
   saveApplications({ skipCloud: true });
-  updateSyncStatus(`Synced ${applications.length} apps`);
+  updateSyncStatus(`Synced ${withoutExamples(applications).length} apps`);
   renderAll();
 }
 
 function mergeApplications(localApps, cloudApps) {
   const map = new Map();
-  [...cloudApps, ...localApps].forEach((app) => {
+  [...cloudApps, ...withoutExamples(localApps)].forEach((app) => {
     const existing = map.get(app.id);
     if (!existing || String(app.updatedAt || "") >= String(existing.updatedAt || "")) {
       map.set(app.id, app);
@@ -880,15 +851,20 @@ function mergeApplications(localApps, cloudApps) {
   return [...map.values()];
 }
 
+function withoutExamples(items) {
+  return (items || []).filter((app) => !app.isExample);
+}
+
 async function syncAllToBackend() {
   if (isSyncing || !supabaseClient || !currentUser) return;
   isSyncing = true;
+  const realApps = withoutExamples(applications);
   try {
     await apiRequest("/api/applications", {
       method: "POST",
-      body: JSON.stringify({ applications }),
+      body: JSON.stringify({ applications: realApps }),
     });
-    updateSyncStatus(`Synced ${applications.length} apps`);
+    updateSyncStatus(`Synced ${realApps.length} apps`);
   } catch (error) {
     updateSyncStatus(`Sync error: ${error.message}`);
   }
@@ -1050,11 +1026,6 @@ document.querySelector("#clearSyncBtn").addEventListener("click", clearSyncSetti
 els.syncBackdrop.addEventListener("click", closeSyncModal);
 els.syncForm.addEventListener("submit", saveSyncSettings);
 document.querySelector("#exportBtn").addEventListener("click", exportData);
-document.querySelector("#seedBtn").addEventListener("click", () => {
-  applications = sampleApplications.map((app) => normalizeApplication({ ...app, id: crypto.randomUUID() }));
-  saveApplications();
-  renderAll();
-});
 document.querySelector("#importInput").addEventListener("change", (event) => {
   const [file] = event.target.files;
   if (file) importData(file);
