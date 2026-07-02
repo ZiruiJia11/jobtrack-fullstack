@@ -1081,3 +1081,11 @@ els.rows.addEventListener("click", (event) => {
 renderFilters();
 renderAll();
 initSupabase();
+registerServiceWorker();
+
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator) || location.hostname === "localhost") return;
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}

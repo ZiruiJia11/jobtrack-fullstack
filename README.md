@@ -70,6 +70,17 @@ Open `http://localhost:3000`.
 3. Add the same environment variables from `.env.example`.
 4. Deploy.
 
+## iPhone Install
+
+JobTrack includes basic PWA support for iOS.
+
+1. Open the live site in Safari on iPhone.
+2. Tap Share.
+3. Choose Add to Home Screen.
+4. Open JobTrack from the home screen like a standalone app.
+
+For a true App Store app, wrap this web app with Capacitor or rebuild it in React Native/Expo, then publish with an Apple Developer account.
+
 ### Render
 
 Use a Web Service with:
