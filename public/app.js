@@ -91,6 +91,7 @@ const els = {
   detailsClFile: document.querySelector("#detailsClFile"),
   attentionCount: document.querySelector("#attentionCount"),
   activeCount: document.querySelector("#activeCount"),
+  activeSummary: document.querySelector("#activeSummary"),
   interviewCount: document.querySelector("#interviewCount"),
   staleCount: document.querySelector("#staleCount"),
   staleList: document.querySelector("#staleList"),
@@ -343,6 +344,7 @@ function renderStats() {
   const interviews = realApps.filter((app) => ["Interview", "Take-home", "Final"].includes(app.status)).length;
   const offers = realApps.filter((app) => app.status === "Offer").length;
   const rejected = realApps.filter((app) => app.status === "Rejected").length;
+  const closed = realApps.length - open;
   const stale = staleApplications();
   const dueNow = realApps.filter((app) => {
     const days = daysUntil(app.followUpDate);
@@ -356,7 +358,8 @@ function renderStats() {
     <div class="stat-row"><span>Rejected</span><strong>${rejected}</strong></div>
   `;
   if (els.attentionCount) els.attentionCount.textContent = `${stale.length + dueNow}`;
-  if (els.activeCount) els.activeCount.textContent = `${open}`;
+  if (els.activeCount) els.activeCount.textContent = `${realApps.length}`;
+  if (els.activeSummary) els.activeSummary.textContent = `${open} open / ${closed} closed or inactive.`;
   if (els.interviewCount) els.interviewCount.textContent = `${interviews}`;
 
   const active = realApps.filter((app) => !["Offer", "Rejected", "Withdrawn"].includes(app.status));

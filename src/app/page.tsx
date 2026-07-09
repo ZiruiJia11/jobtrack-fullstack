@@ -82,9 +82,9 @@ const pageMarkup = String.raw`
           <p>Follow-ups due now or applications quiet for 30+ days.</p>
         </div>
         <div class="action-card">
-          <span class="action-label">Active pipeline</span>
+          <span class="action-label">Tracked applications</span>
           <strong id="activeCount">0</strong>
-          <p>Open roles still worth tracking.</p>
+          <p id="activeSummary">Applications saved in JobTrack.</p>
         </div>
         <div class="action-card">
           <span class="action-label">Interview motion</span>
