@@ -142,6 +142,14 @@ function normalizeApplications(items) {
   return (items || []).map(normalizeApplication);
 }
 
+function isExampleApplication(app) {
+  return (
+    app?.isExample === true ||
+    (app?.link === "https://example.com/jobs" &&
+      app?.notes === "Example row. Replace it with your real application.")
+  );
+}
+
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -216,7 +224,9 @@ function probabilityFor(app) {
     "No Response": 10,
   }[app.status] ?? 16;
 
-  const historicalClosed = applications.filter((item) => ["Offer", "Rejected", "Withdrawn"].includes(item.status));
+  const historicalClosed = withoutExamples(applications).filter((item) =>
+    ["Offer", "Rejected", "Withdrawn"].includes(item.status),
+  );
   const offerRate =
     historicalClosed.length > 0
       ? historicalClosed.filter((item) => item.status === "Offer").length / historicalClosed.length
@@ -246,7 +256,7 @@ function filteredApplications() {
   const follow = els.followFilter.value;
   const query = els.searchInput.value.trim().toLowerCase();
 
-  return applications.filter((app) => {
+  return withoutExamples(applications).filter((app) => {
     const text = `${app.company} ${app.role} ${app.category} ${app.notes}`.toLowerCase();
     const due = daysUntil(app.followUpDate);
     const matchesFollow =
@@ -328,12 +338,13 @@ function materialTags(app) {
 }
 
 function renderStats() {
-  const open = applications.filter((app) => !["Offer", "Rejected", "Withdrawn"].includes(app.status)).length;
-  const interviews = applications.filter((app) => ["Interview", "Take-home", "Final"].includes(app.status)).length;
-  const offers = applications.filter((app) => app.status === "Offer").length;
-  const rejected = applications.filter((app) => app.status === "Rejected").length;
+  const realApps = withoutExamples(applications);
+  const open = realApps.filter((app) => !["Offer", "Rejected", "Withdrawn"].includes(app.status)).length;
+  const interviews = realApps.filter((app) => ["Interview", "Take-home", "Final"].includes(app.status)).length;
+  const offers = realApps.filter((app) => app.status === "Offer").length;
+  const rejected = realApps.filter((app) => app.status === "Rejected").length;
   const stale = staleApplications();
-  const dueNow = applications.filter((app) => {
+  const dueNow = realApps.filter((app) => {
     const days = daysUntil(app.followUpDate);
     return days !== null && days <= 0 && !["Offer", "Rejected", "Withdrawn"].includes(app.status);
   }).length;
@@ -348,7 +359,7 @@ function renderStats() {
   if (els.activeCount) els.activeCount.textContent = `${open}`;
   if (els.interviewCount) els.interviewCount.textContent = `${interviews}`;
 
-  const active = applications.filter((app) => !["Offer", "Rejected", "Withdrawn"].includes(app.status));
+  const active = realApps.filter((app) => !["Offer", "Rejected", "Withdrawn"].includes(app.status));
   const avg = active.length ? Math.round(active.reduce((sum, app) => sum + probabilityFor(app), 0) / active.length) : 0;
   els.avgProbability.textContent = `${avg}%`;
   els.probabilityNote.textContent = active.length
@@ -357,9 +368,10 @@ function renderStats() {
 }
 
 function renderStatusChart() {
+  const realApps = withoutExamples(applications);
   const counts = STATUSES.map((status) => ({
     status,
-    count: applications.filter((app) => app.status === status).length,
+    count: realApps.filter((app) => app.status === status).length,
   })).filter((item) => item.count > 0);
   const max = Math.max(1, ...counts.map((item) => item.count));
   els.statusChart.innerHTML =
@@ -379,7 +391,7 @@ function renderStatusChart() {
 }
 
 function renderDueList() {
-  const due = applications
+  const due = withoutExamples(applications)
     .filter((app) => {
       const days = daysUntil(app.followUpDate);
       return days !== null && days <= 7 && !["Offer", "Rejected", "Withdrawn"].includes(app.status);
@@ -409,7 +421,7 @@ function isStaleApplication(app) {
 }
 
 function staleApplications() {
-  return applications
+  return withoutExamples(applications)
     .filter(isStaleApplication)
     .sort((a, b) => daysBetween(b.appliedDate) - daysBetween(a.appliedDate));
 }
@@ -437,7 +449,7 @@ function renderStaleList() {
 
 function renderTimeline() {
   const buckets = new Map();
-  applications.forEach((app) => {
+  withoutExamples(applications).forEach((app) => {
     if (!app.appliedDate) return;
     const key = app.appliedDate.slice(0, 7);
     buckets.set(key, (buckets.get(key) || 0) + 1);
@@ -693,7 +705,7 @@ async function deleteCurrent() {
 }
 
 function exportData() {
-  const blob = new Blob([JSON.stringify(applications, null, 2)], { type: "application/json" });
+  const blob = new Blob([JSON.stringify(withoutExamples(applications), null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -847,13 +859,15 @@ async function loadFromBackend() {
     return;
   }
 
-  const cloudApps = normalizeApplications(
+  const loadedCloudApps = normalizeApplications(
     (data.applications || []).map((row) => ({
       id: row.id,
       ...row,
       ...row.payload,
     })),
   );
+  const cloudApps = withoutExamples(loadedCloudApps);
+  await deleteExampleRowsFromBackend(loadedCloudApps.filter(isExampleApplication));
   applications = mergeApplications(applications, cloudApps);
   saveApplications({ skipCloud: true });
   updateSyncStatus(`Synced ${withoutExamples(applications).length} apps`);
@@ -862,7 +876,7 @@ async function loadFromBackend() {
 
 function mergeApplications(localApps, cloudApps) {
   const map = new Map();
-  [...cloudApps, ...withoutExamples(localApps)].forEach((app) => {
+  [...withoutExamples(cloudApps), ...withoutExamples(localApps)].forEach((app) => {
     const existing = map.get(app.id);
     if (!existing || String(app.updatedAt || "") >= String(existing.updatedAt || "")) {
       map.set(app.id, app);
@@ -872,7 +886,16 @@ function mergeApplications(localApps, cloudApps) {
 }
 
 function withoutExamples(items) {
-  return (items || []).filter((app) => app.isExample !== true);
+  return (items || []).filter((app) => !isExampleApplication(app));
+}
+
+async function deleteExampleRowsFromBackend(exampleApps) {
+  if (!exampleApps.length) return;
+  await Promise.all(
+    exampleApps.map((app) =>
+      apiRequest(`/api/applications?id=${encodeURIComponent(app.id)}`, { method: "DELETE" }).catch(() => null),
+    ),
+  );
 }
 
 async function syncAllToBackend() {
