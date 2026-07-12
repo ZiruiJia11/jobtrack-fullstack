@@ -68,6 +68,7 @@ const els = {
   categoryFilter: document.querySelector("#categoryFilter"),
   followFilter: document.querySelector("#followFilter"),
   searchInput: document.querySelector("#searchInput"),
+  resetFiltersBtn: document.querySelector("#resetFiltersBtn"),
   avgProbability: document.querySelector("#avgProbability"),
   probabilityNote: document.querySelector("#probabilityNote"),
   statusChart: document.querySelector("#statusChart"),
@@ -504,6 +505,57 @@ function renderAll() {
   renderDueList();
   renderStaleList();
   renderTimeline();
+}
+
+function setActiveNav(target) {
+  document.querySelectorAll(".nav-item").forEach((item) => {
+    item.classList.toggle("active", item.dataset.nav === target);
+  });
+}
+
+function scrollToSection(selector) {
+  document.querySelector(selector)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function resetFilters() {
+  els.statusFilter.value = "all";
+  els.sourceFilter.value = "all";
+  els.categoryFilter.value = "all";
+  els.followFilter.value = "all";
+  els.searchInput.value = "";
+  renderRows();
+}
+
+function handleNav(target) {
+  setActiveNav(target);
+  if (target === "dashboard") {
+    resetFilters();
+    scrollToSection("#dashboard");
+    return;
+  }
+  if (target === "applications") {
+    resetFilters();
+    scrollToSection("#applications");
+    return;
+  }
+  if (target === "followups") {
+    els.followFilter.value = "week";
+    renderRows();
+    scrollToSection("#followups");
+    return;
+  }
+  if (target === "analytics") {
+    scrollToSection("#analytics");
+  }
+}
+
+function restoreNavFromHash() {
+  const target = location.hash.replace("#", "") || "dashboard";
+  if (["dashboard", "applications", "followups", "analytics"].includes(target)) {
+    handleNav(target);
+  } else {
+    setActiveNav("dashboard");
+  }
 }
 
 function openDrawer(app = null) {
@@ -1076,9 +1128,18 @@ document.querySelector("#clearSyncBtn").addEventListener("click", clearSyncSetti
 els.syncBackdrop.addEventListener("click", closeSyncModal);
 els.syncForm.addEventListener("submit", saveSyncSettings);
 document.querySelector("#exportBtn").addEventListener("click", exportData);
+els.resetFiltersBtn.addEventListener("click", resetFilters);
 document.querySelector("#importInput").addEventListener("change", (event) => {
   const [file] = event.target.files;
   if (file) importData(file);
+});
+
+document.querySelectorAll(".nav-item").forEach((item) => {
+  item.addEventListener("click", (event) => {
+    event.preventDefault();
+    handleNav(item.dataset.nav);
+    history.replaceState(null, "", item.getAttribute("href"));
+  });
 });
 
 [els.statusFilter, els.sourceFilter, els.categoryFilter, els.followFilter, els.searchInput].forEach((input) => {
@@ -1101,6 +1162,7 @@ els.rows.addEventListener("click", (event) => {
 
 renderFilters();
 renderAll();
+restoreNavFromHash();
 initSupabase();
 registerServiceWorker();
 

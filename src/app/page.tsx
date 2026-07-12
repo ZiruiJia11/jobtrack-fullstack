@@ -25,10 +25,10 @@ const pageMarkup = String.raw`
         <span>JobTrack</span>
       </div>
       <nav class="nav-list">
-        <a class="nav-item active" href="#dashboard">Dashboard</a>
-        <a class="nav-item" href="#applications">Applications</a>
-        <a class="nav-item" href="#followups">Follow-ups</a>
-        <a class="nav-item" href="#analytics">Analytics</a>
+        <a class="nav-item active" href="#dashboard" data-nav="dashboard">Dashboard</a>
+        <a class="nav-item" href="#applications" data-nav="applications">Applications</a>
+        <a class="nav-item" href="#followups" data-nav="followups">Follow-ups</a>
+        <a class="nav-item" href="#analytics" data-nav="analytics">Analytics</a>
       </nav>
       <div class="quick-stats" id="quickStats"></div>
       <div class="sync-card">
@@ -42,6 +42,7 @@ const pageMarkup = String.raw`
     <main class="main" id="dashboard">
       <header class="topbar">
         <div>
+          <span class="eyebrow">Personal job search tracker</span>
           <h1>Job search command center</h1>
           <p>Plan the next action, keep materials close, and spot quiet applications before they disappear.</p>
         </div>
@@ -71,6 +72,7 @@ const pageMarkup = String.raw`
           </select>
         </label>
         <label class="search-field">Search<input id="searchInput" type="search" placeholder="Company, role, notes..." /></label>
+        <button class="secondary compact" id="resetFiltersBtn" type="button">Reset</button>
       </section>
 
       <section class="action-board" aria-label="Application action summary">
