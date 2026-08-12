@@ -714,7 +714,7 @@ function readFileAsDataUrl(file) {
 
 async function uploadMaterialFile(appId, file, previousPath = "", label = "file") {
   const headers = await authHeaders(false);
-  if (!headers) throw new Error("Please sign in first.");
+  if (!headers) throw new Error("Your login session expired. Please sign in again, then retry the upload.");
   const formData = new FormData();
   formData.append("appId", appId);
   formData.append("file", file);
@@ -726,6 +726,11 @@ async function uploadMaterialFile(appId, file, previousPath = "", label = "file"
     body: formData,
   });
   const payload = await response.json().catch(() => ({}));
+  if (response.status === 401) {
+    currentUser = null;
+    setAuthView(false);
+    updateSyncStatus("Session expired. Please sign in again.");
+  }
   if (!response.ok) throw new Error(payload.error || `Upload failed: ${response.status}`);
 
   return {
@@ -842,8 +847,14 @@ async function initSupabase() {
   }
 
   updateSyncStatus("Backend configured");
-  const { data } = await supabaseClient.auth.getSession();
-  currentUser = data.session?.user || null;
+  let initialSession = null;
+  try {
+    const { data } = await supabaseClient.auth.getSession();
+    initialSession = data.session;
+  } catch {
+    updateSyncStatus("Session expired. Please sign in again.");
+  }
+  currentUser = initialSession?.user || null;
   if (currentUser) {
     setAuthView(true);
     updateSyncStatus(`Signed in: ${currentUser.email || "anonymous user"}`);
@@ -879,10 +890,25 @@ function updateSyncStatus(message) {
 
 async function authHeaders(includeJson = true) {
   if (!supabaseClient) return null;
-  const { data, error } = await supabaseClient.auth.getSession();
-  if (error || !data.session?.access_token) return null;
+  let session;
+  try {
+    const { data, error } = await supabaseClient.auth.getSession();
+    if (error) throw error;
+    session = data.session;
+  } catch {
+    currentUser = null;
+    setAuthView(false);
+    updateSyncStatus("Session expired. Please sign in again.");
+    return null;
+  }
+  if (!session?.access_token) {
+    currentUser = null;
+    setAuthView(false);
+    updateSyncStatus("Session expired. Please sign in again.");
+    return null;
+  }
   const headers = {
-    Authorization: `Bearer ${data.session.access_token}`,
+    Authorization: `Bearer ${session.access_token}`,
   };
   if (includeJson) headers["Content-Type"] = "application/json";
   return headers;
@@ -890,7 +916,7 @@ async function authHeaders(includeJson = true) {
 
 async function apiRequest(path, options = {}) {
   const headers = await authHeaders();
-  if (!headers) throw new Error("Please sign in first.");
+  if (!headers) throw new Error("Your login session expired. Please sign in again, then retry.");
   const response = await fetch(path, {
     ...options,
     headers: {

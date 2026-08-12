@@ -1,4 +1,4 @@
-const CACHE_NAME = "jobtrack-shell-v3";
+const CACHE_NAME = "jobtrack-shell-v4";
 const SHELL_ASSETS = ["/", "/icon.svg", "/manifest.webmanifest"];
 const NETWORK_FIRST_ASSETS = new Set(["/", "/styles.css", "/app.js"]);
 
