@@ -8,11 +8,14 @@ Live site: https://jobtrack-fullstack-ashy.vercel.app/
 
 - Track company, role, job link, source, category, job type, status, and dates.
 - Save JD text, cover letter text, and a small CV file per application.
+- Import a public job URL and prefill company, role, job description, and category for review.
 - Upload CV files to private Supabase Storage and download them across devices.
 - Edit and delete existing applications.
 - Filter by status, source, category, follow-up timing, and search text.
 - Estimate success probability from stage, timing, and your own history.
 - Sync data through a backend API into Supabase.
+- Analyse a saved or pasted job description with a tool-using AI Match Agent.
+- Ground each match report in reviewed CV evidence and show the agent's tool trace.
 - Restrict login to one email: `steven5115115@gmail.com`.
 
 ## Tech Stack
@@ -21,6 +24,31 @@ Live site: https://jobtrack-fullstack-ashy.vercel.app/
 - Supabase Auth
 - Supabase Postgres
 - Next.js Route Handler API
+- Vercel AI SDK `ToolLoopAgent`
+- OpenAI Responses API with schema-validated output
+
+## AI Match Agent
+
+The match feature is an agentic workflow, not a free-form chatbot:
+
+1. It extracts the important requirements from the job description.
+2. It must call `retrieveCandidateEvidence` to find reviewed CV and portfolio proof.
+3. It must call `assessRequirementGaps` to label requirements as matched, partial, or missing.
+4. It returns a Zod-validated fit report with strengths, gaps, interview questions, next actions, and a cover-letter angle.
+
+The server enforces authentication, input limits, a four-step execution cap, and structured output. Candidate evidence lives in `src/lib/agent/candidate-profile.ts`, so the model cannot silently add unverified claims.
+
+## Job URL Import
+
+Paste a public job-page URL into the add/edit form and choose **Import details**. The authenticated server route reads Schema.org `JobPosting` JSON-LD first, then falls back to common job-board metadata and page sections. It classifies the role using deterministic category rules and only prefills the form; nothing is saved until the user reviews and submits it.
+
+For safety, the importer permits only standard public HTTP(S) pages, checks DNS and every redirect for private/local addresses, limits redirects, response size and request duration, and rejects non-HTML responses. Login-protected or JavaScript-only job boards may block server-side extraction; those descriptions must be pasted manually.
+
+### SEEK and LinkedIn browser helper
+
+LinkedIn public job pages are supported directly. SEEK currently blocks server-side requests, so the optional extension in `browser-extension/` provides a safe fallback for SEEK and signed-in LinkedIn pages. It opens the pasted URL in an inactive browser tab, reads only the title, company and job description using the browser's existing session, returns those fields to JobTrack, and closes that temporary tab.
+
+Load the extension as an unpacked Chrome/Edge extension using the instructions in `browser-extension/README.md`. No job-site password or cookie is stored in JobTrack.
 
 ## Local Setup
 
@@ -37,7 +65,11 @@ NEXT_PUBLIC_SUPABASE_URL=https://pexthgxqandoeesqbelb.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_public_key
 SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_secret_key
 JOBTRACK_LOGIN_EMAIL=steven5115115@gmail.com
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_MODEL=gpt-5.6-luna
 ```
+
+`OPENAI_MODEL` is optional. The default is `gpt-5.6-luna`. Keep `OPENAI_API_KEY` server-side and never prefix it with `NEXT_PUBLIC_`.
 
 3. Run the database schema in Supabase SQL Editor:
 
@@ -93,6 +125,10 @@ Use a Web Service with:
 
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` is safe to expose in browser code.
 - `SUPABASE_SERVICE_ROLE_KEY` is private and must only live in Vercel/Render environment variables.
+- `OPENAI_API_KEY` is private and must only live in local or deployment environment variables.
 - The backend verifies the Supabase session token and only allows `JOBTRACK_LOGIN_EMAIL`.
+- The AI endpoint uses the same authenticated-session check and never sends the API key to the browser.
+- The URL importer rejects private-network targets and validates redirects to reduce SSRF risk.
+- The optional browser helper accepts only HTTPS SEEK/LinkedIn URLs and messages from approved JobTrack hostnames.
 - Keep Supabase Auth public signups off if this is only for one personal account.
 - CV downloads use short-lived signed URLs after the backend confirms the logged-in user owns the file.

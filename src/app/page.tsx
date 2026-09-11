@@ -27,6 +27,7 @@ const pageMarkup = String.raw`
       <nav class="nav-list">
         <a class="nav-item active" href="#dashboard" data-nav="dashboard">Dashboard</a>
         <a class="nav-item" href="#applications" data-nav="applications">Applications</a>
+        <a class="nav-item" href="#agent" data-nav="agent">AI Match Agent</a>
         <a class="nav-item" href="#followups" data-nav="followups">Follow-ups</a>
         <a class="nav-item" href="#analytics" data-nav="analytics">Analytics</a>
       </nav>
@@ -92,6 +93,77 @@ const pageMarkup = String.raw`
           <span class="action-label">Interview motion</span>
           <strong id="interviewCount">0</strong>
           <p>Screening, interview, take-home, or final.</p>
+        </div>
+      </section>
+
+      <section class="agent-panel" id="agent" aria-labelledby="agentTitle">
+        <div class="agent-panel-head">
+          <div>
+            <span class="eyebrow">Tool-using, evidence-grounded analysis</span>
+            <h2 id="agentTitle">AI Match Agent</h2>
+            <p>Compare a role with Steven's verified CV evidence. The agent retrieves relevant proof, checks gaps, and returns a structured recommendation.</p>
+          </div>
+          <span class="agent-badge">OpenAI + AI SDK</span>
+        </div>
+
+        <form class="agent-form" id="agentForm">
+          <label class="agent-application-field">
+            Load a tracked application
+            <select id="agentApplication">
+              <option value="">Choose an application or enter one below</option>
+            </select>
+          </label>
+          <div class="two-col">
+            <label>Company<input id="agentCompany" maxlength="120" placeholder="e.g. Mercury" /></label>
+            <label>Role<input id="agentRole" maxlength="160" placeholder="e.g. Software Engineer" /></label>
+          </div>
+          <label>
+            Job description *
+            <textarea id="agentJobDescription" rows="10" minlength="80" maxlength="20000" required placeholder="Paste the complete job description here..."></textarea>
+          </label>
+          <div class="agent-form-actions">
+            <p class="muted">Your OpenAI key stays on the server. CV evidence is fixed and reviewed rather than generated.</p>
+            <button class="primary" id="agentSubmitBtn" type="submit">Analyse match</button>
+          </div>
+        </form>
+
+        <div class="agent-status hidden" id="agentStatus" role="status" aria-live="polite"></div>
+        <div class="agent-result hidden" id="agentResult" aria-live="polite">
+          <div class="agent-score-card">
+            <div>
+              <span class="action-label">Evidence-based fit</span>
+              <strong id="agentScore">—</strong>
+            </div>
+            <span class="agent-recommendation" id="agentRecommendation"></span>
+          </div>
+          <div class="agent-summary" id="agentSummary"></div>
+          <div class="agent-result-grid">
+            <section>
+              <h3>Verified strengths</h3>
+              <ul class="agent-list" id="agentStrengths"></ul>
+            </section>
+            <section>
+              <h3>Gaps and mitigations</h3>
+              <ul class="agent-list" id="agentGaps"></ul>
+            </section>
+            <section>
+              <h3>Likely interview questions</h3>
+              <ul class="agent-list" id="agentQuestions"></ul>
+            </section>
+            <section>
+              <h3>Next actions</h3>
+              <ul class="agent-list" id="agentActions"></ul>
+            </section>
+          </div>
+          <section class="agent-angle">
+            <h3>Cover-letter angle</h3>
+            <p id="agentCoverLetter"></p>
+          </section>
+          <details class="agent-trace">
+            <summary>Agent tool trace</summary>
+            <ol id="agentTrace"></ol>
+            <p class="muted" id="agentModel"></p>
+          </details>
         </div>
       </section>
 
@@ -162,7 +234,16 @@ const pageMarkup = String.raw`
       <input id="recordId" type="hidden" />
       <label>Company *<input id="company" required placeholder="e.g. Google" /></label>
       <label>Role *<input id="role" required placeholder="e.g. Software Engineer" /></label>
-      <label>Job link<input id="link" type="url" placeholder="https://" /></label>
+      <div class="url-import-block">
+        <label>
+          Job link
+          <div class="url-import-row">
+            <input id="link" type="url" placeholder="https://company.com/jobs/role" />
+            <button class="secondary" id="importJobUrlBtn" type="button">Import details</button>
+          </div>
+        </label>
+        <div class="file-note" id="urlImportNote">Paste a public job URL to fill company, role, JD, and category.</div>
+      </div>
       <div class="two-col">
         <label>Source<select id="source"></select></label>
         <label>Category<select id="category"></select></label>

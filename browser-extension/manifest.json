@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "JobTrack SEEK & LinkedIn Importer",
+  "version": "1.0.0",
+  "description": "Uses your current browser session to import SEEK and LinkedIn job details into JobTrack.",
+  "permissions": ["tabs", "scripting"],
+  "host_permissions": [
+    "https://seek.co.nz/*",
+    "https://*.seek.co.nz/*",
+    "https://linkedin.com/*",
+    "https://*.linkedin.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://jobtrack-fullstack-ashy.vercel.app/*",
+        "https://jobtrack-fullstack.vercel.app/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_title": "JobTrack job importer"
+  }
+}

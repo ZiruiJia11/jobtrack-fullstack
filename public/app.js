@@ -11,7 +11,7 @@ const STATUSES = [
   "No Response",
 ];
 
-const SOURCES = ["Company Website", "LinkedIn", "Referral", "Recruiter", "Indeed", "Email", "Other"];
+const SOURCES = ["Company Website", "SEEK", "LinkedIn", "Referral", "Recruiter", "Indeed", "Email", "Other"];
 const CATEGORIES = [
   "Software Engineer",
   "Full-stack",
@@ -80,6 +80,8 @@ const els = {
   form: document.querySelector("#applicationForm"),
   drawerTitle: document.querySelector("#drawerTitle"),
   deleteBtn: document.querySelector("#deleteBtn"),
+  importJobUrlBtn: document.querySelector("#importJobUrlBtn"),
+  urlImportNote: document.querySelector("#urlImportNote"),
   cvFileNote: document.querySelector("#cvFileNote"),
   clFileNote: document.querySelector("#clFileNote"),
   detailsModal: document.querySelector("#detailsModal"),
@@ -104,6 +106,24 @@ const els = {
   supabaseAnonKey: document.querySelector("#supabaseAnonKey"),
   syncEmail: document.querySelector("#syncEmail"),
   syncFormNote: document.querySelector("#syncFormNote"),
+  agentForm: document.querySelector("#agentForm"),
+  agentApplication: document.querySelector("#agentApplication"),
+  agentCompany: document.querySelector("#agentCompany"),
+  agentRole: document.querySelector("#agentRole"),
+  agentJobDescription: document.querySelector("#agentJobDescription"),
+  agentSubmitBtn: document.querySelector("#agentSubmitBtn"),
+  agentStatus: document.querySelector("#agentStatus"),
+  agentResult: document.querySelector("#agentResult"),
+  agentScore: document.querySelector("#agentScore"),
+  agentRecommendation: document.querySelector("#agentRecommendation"),
+  agentSummary: document.querySelector("#agentSummary"),
+  agentStrengths: document.querySelector("#agentStrengths"),
+  agentGaps: document.querySelector("#agentGaps"),
+  agentQuestions: document.querySelector("#agentQuestions"),
+  agentActions: document.querySelector("#agentActions"),
+  agentCoverLetter: document.querySelector("#agentCoverLetter"),
+  agentTrace: document.querySelector("#agentTrace"),
+  agentModel: document.querySelector("#agentModel"),
 };
 
 function normalizeApplication(app) {
@@ -505,6 +525,32 @@ function renderAll() {
   renderDueList();
   renderStaleList();
   renderTimeline();
+  renderAgentApplicationOptions();
+}
+
+function renderAgentApplicationOptions() {
+  if (!els.agentApplication) return;
+  const currentValue = els.agentApplication.value;
+  els.agentApplication.replaceChildren();
+
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Choose an application or enter one below";
+  els.agentApplication.append(placeholder);
+
+  withoutExamples(applications)
+    .filter((app) => app.company || app.role)
+    .sort((a, b) => `${a.company} ${a.role}`.localeCompare(`${b.company} ${b.role}`))
+    .forEach((app) => {
+      const option = document.createElement("option");
+      option.value = app.id;
+      option.textContent = `${app.company || "Unknown company"} — ${app.role || "Unknown role"}${app.jobDescription ? "" : " (no JD)"}`;
+      els.agentApplication.append(option);
+    });
+
+  if ([...els.agentApplication.options].some((option) => option.value === currentValue)) {
+    els.agentApplication.value = currentValue;
+  }
 }
 
 function setActiveNav(target) {
@@ -538,6 +584,10 @@ function handleNav(target) {
     scrollToSection("#applications");
     return;
   }
+  if (target === "agent") {
+    scrollToSection("#agent");
+    return;
+  }
   if (target === "followups") {
     els.followFilter.value = "week";
     renderRows();
@@ -551,7 +601,7 @@ function handleNav(target) {
 
 function restoreNavFromHash() {
   const target = location.hash.replace("#", "") || "dashboard";
-  if (["dashboard", "applications", "followups", "analytics"].includes(target)) {
+  if (["dashboard", "applications", "agent", "followups", "analytics"].includes(target)) {
     handleNav(target);
   } else {
     setActiveNav("dashboard");
@@ -594,6 +644,12 @@ function openDrawer(app = null) {
   }
   updateCvNote(app);
   updateClNote(app);
+  setUrlImportNote(
+    isBrowserImporterReady()
+      ? "Browser helper connected. SEEK and LinkedIn signed-in pages are supported."
+      : "Paste a public job URL. SEEK may require the optional browser helper.",
+    isBrowserImporterReady() ? "success" : "info",
+  );
 
   els.drawer.classList.remove("hidden");
   els.drawerBackdrop.classList.remove("hidden");
@@ -1123,8 +1179,275 @@ function escapeHtml(value = "") {
     .replaceAll("'", "&#039;");
 }
 
+function setUrlImportNote(message, type = "info") {
+  if (!els.urlImportNote) return;
+  els.urlImportNote.textContent = message;
+  els.urlImportNote.dataset.type = type;
+}
+
+function isBrowserImporterReady() {
+  return document.documentElement.dataset.jobtrackImporter === "ready";
+}
+
+function isExtensionSourceUrl(rawUrl) {
+  try {
+    const hostname = new URL(rawUrl).hostname.toLowerCase();
+    return (
+      hostname === "seek.co.nz" ||
+      hostname.endsWith(".seek.co.nz") ||
+      hostname === "linkedin.com" ||
+      hostname.endsWith(".linkedin.com")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function requestBrowserImporter(url) {
+  if (!isBrowserImporterReady()) {
+    return Promise.reject(
+      new Error("SEEK or LinkedIn blocked direct import. Install the optional JobTrack browser helper, reload this page, and retry."),
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    const requestId = crypto.randomUUID();
+    const timeout = window.setTimeout(() => {
+      window.removeEventListener("message", handleResponse);
+      reject(new Error("The browser helper timed out while opening the job page."));
+    }, 35_000);
+
+    function handleResponse(event) {
+      if (event.source !== window || event.origin !== location.origin) return;
+      const message = event.data;
+      if (
+        message?.source !== "jobtrack-extension" ||
+        message.type !== "JOBTRACK_IMPORT_RESPONSE" ||
+        message.requestId !== requestId
+      ) {
+        return;
+      }
+
+      window.clearTimeout(timeout);
+      window.removeEventListener("message", handleResponse);
+      if (message.ok && message.job) resolve(message.job);
+      else reject(new Error(message.error || "The browser helper could not import this job."));
+    }
+
+    window.addEventListener("message", handleResponse);
+    window.postMessage(
+      { source: "jobtrack", type: "JOBTRACK_IMPORT_REQUEST", requestId, url },
+      location.origin,
+    );
+  });
+}
+
+function applyImportedJob(job, linkInput) {
+  if (job.finalUrl) linkInput.value = job.finalUrl;
+  if (job.company) document.querySelector("#company").value = job.company;
+  if (job.title) document.querySelector("#role").value = job.title;
+  if (job.jobDescription) document.querySelector("#jobDescription").value = job.jobDescription;
+  if (CATEGORIES.includes(job.category)) document.querySelector("#category").value = job.category;
+  if (SOURCES.includes(job.source)) document.querySelector("#source").value = job.source;
+
+  const imported = [
+    job.company && "company",
+    job.title && "title",
+    job.jobDescription && "job description",
+    job.category && "category",
+  ].filter(Boolean);
+  const missing = [
+    !job.company && "company",
+    !job.title && "title",
+    !job.jobDescription && "job description",
+  ].filter(Boolean);
+
+  if (missing.length) {
+    setUrlImportNote(
+      `Imported ${imported.join(", ")}. Could not detect ${missing.join(", ")}; please enter it manually. Review everything before saving.`,
+      "warning",
+    );
+  } else {
+    const via = job.source === "SEEK" || job.source === "LinkedIn" ? ` from ${job.source}` : "";
+    setUrlImportNote(`Imported ${imported.join(", ")}${via}. Review the details before saving.`, "success");
+  }
+}
+
+async function importJobUrl() {
+  const linkInput = document.querySelector("#link");
+  const url = linkInput.value.trim();
+  if (!url) {
+    setUrlImportNote("Paste a job URL first.", "warning");
+    linkInput.focus();
+    return;
+  }
+
+  els.importJobUrlBtn.disabled = true;
+  els.importJobUrlBtn.textContent = "Importing…";
+  setUrlImportNote("Opening the page and extracting job details…");
+
+  try {
+    let job;
+    try {
+      const response = await apiRequest("/api/job-import", {
+        method: "POST",
+        body: JSON.stringify({ url }),
+      });
+      job = response.job;
+    } catch (serverError) {
+      if (!isExtensionSourceUrl(url)) throw serverError;
+      setUrlImportNote("Direct import was blocked. Using the signed-in browser helper…");
+      job = await requestBrowserImporter(url);
+    }
+
+    applyImportedJob(job, linkInput);
+  } catch (error) {
+    setUrlImportNote(error.message || "The job page could not be imported.", "error");
+  } finally {
+    els.importJobUrlBtn.disabled = false;
+    els.importJobUrlBtn.textContent = "Import details";
+  }
+}
+
+function loadApplicationIntoAgent() {
+  const app = applications.find((item) => item.id === els.agentApplication.value);
+  if (!app) return;
+  els.agentCompany.value = app.company || "";
+  els.agentRole.value = app.role || "";
+  els.agentJobDescription.value = app.jobDescription || "";
+  if (!app.jobDescription) {
+    showAgentStatus("This application has no saved job description yet. Paste it below before analysing.", "warning");
+  } else {
+    hideAgentStatus();
+  }
+}
+
+function showAgentStatus(message, type = "info") {
+  els.agentStatus.textContent = message;
+  els.agentStatus.dataset.type = type;
+  els.agentStatus.classList.remove("hidden");
+}
+
+function hideAgentStatus() {
+  els.agentStatus.classList.add("hidden");
+  els.agentStatus.textContent = "";
+}
+
+function appendAgentListItem(list, title, body, badge = "") {
+  const item = document.createElement("li");
+  const heading = document.createElement("div");
+  heading.className = "agent-list-heading";
+
+  const strong = document.createElement("strong");
+  strong.textContent = title;
+  heading.append(strong);
+
+  if (badge) {
+    const tag = document.createElement("span");
+    tag.className = `severity severity-${badge}`;
+    tag.textContent = badge;
+    heading.append(tag);
+  }
+
+  item.append(heading);
+  if (body) {
+    const paragraph = document.createElement("p");
+    paragraph.textContent = body;
+    item.append(paragraph);
+  }
+  list.append(item);
+}
+
+function renderSimpleAgentList(list, values) {
+  list.replaceChildren();
+  (values || []).forEach((value) => {
+    const item = document.createElement("li");
+    item.textContent = value;
+    list.append(item);
+  });
+}
+
+function renderAgentReport(payload) {
+  const report = payload.report;
+  if (!report) throw new Error("The agent returned no structured report.");
+
+  const recommendationLabels = {
+    strong_apply: "Strong apply",
+    apply: "Apply",
+    stretch: "Stretch",
+    skip: "Skip",
+  };
+
+  els.agentScore.textContent = `${report.fitScore}%`;
+  els.agentRecommendation.textContent = recommendationLabels[report.recommendation] || report.recommendation;
+  els.agentRecommendation.dataset.level = report.recommendation;
+  els.agentSummary.textContent = report.summary;
+  els.agentCoverLetter.textContent = report.coverLetterAngle;
+
+  els.agentStrengths.replaceChildren();
+  (report.strengths || []).forEach((item) =>
+    appendAgentListItem(els.agentStrengths, item.requirement, item.evidence),
+  );
+
+  els.agentGaps.replaceChildren();
+  (report.gaps || []).forEach((item) =>
+    appendAgentListItem(els.agentGaps, item.requirement, item.mitigation, item.severity),
+  );
+
+  renderSimpleAgentList(els.agentQuestions, report.interviewQuestions);
+  renderSimpleAgentList(els.agentActions, report.nextActions);
+
+  els.agentTrace.replaceChildren();
+  (payload.trace || []).forEach((entry) => {
+    const item = document.createElement("li");
+    const labels = {
+      retrieveCandidateEvidence: "Retrieved verified CV evidence",
+      assessRequirementGaps: "Assessed requirement gaps",
+    };
+    item.textContent = `Step ${entry.step}: ${labels[entry.tool] || entry.tool} — ${entry.status}`;
+    els.agentTrace.append(item);
+  });
+  els.agentModel.textContent = `Model: ${payload.model || "configured server model"}`;
+  els.agentResult.classList.remove("hidden");
+}
+
+async function analyseJobMatch(event) {
+  event.preventDefault();
+  const jobDescription = els.agentJobDescription.value.trim();
+  if (jobDescription.length < 80) {
+    showAgentStatus("Paste at least 80 characters of the job description so the agent has enough evidence to assess.", "warning");
+    return;
+  }
+
+  els.agentSubmitBtn.disabled = true;
+  els.agentSubmitBtn.textContent = "Agent working…";
+  els.agentResult.classList.add("hidden");
+  showAgentStatus("Retrieving CV evidence, assessing requirements, and preparing a structured recommendation…");
+
+  try {
+    const payload = await apiRequest("/api/job-match", {
+      method: "POST",
+      body: JSON.stringify({
+        company: els.agentCompany.value.trim(),
+        role: els.agentRole.value.trim(),
+        jobDescription,
+      }),
+    });
+    renderAgentReport(payload);
+    hideAgentStatus();
+  } catch (error) {
+    showAgentStatus(error.message || "The match analysis failed. Please try again.", "error");
+  } finally {
+    els.agentSubmitBtn.disabled = false;
+    els.agentSubmitBtn.textContent = "Analyse match";
+  }
+}
+
 document.querySelector("#openFormBtn").addEventListener("click", () => openDrawer());
+els.importJobUrlBtn.addEventListener("click", importJobUrl);
 els.loginForm.addEventListener("submit", sendLoginLink);
+els.agentApplication.addEventListener("change", loadApplicationIntoAgent);
+els.agentForm.addEventListener("submit", analyseJobMatch);
 document.querySelector("#signOutBtn").addEventListener("click", signOut);
 document.querySelector("#closeFormBtn").addEventListener("click", closeDrawer);
 els.drawerBackdrop.addEventListener("click", closeDrawer);
