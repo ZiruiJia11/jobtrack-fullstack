@@ -868,6 +868,39 @@ tr:hover td {
   margin-top: 8px;
 }
 
+.candidate-profile-modal {
+  width: min(820px, calc(100vw - 32px));
+}
+
+.candidate-profile-intro {
+  margin: -6px 0 18px;
+  line-height: 1.55;
+}
+
+.candidate-upload-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.candidate-upload-row button {
+  min-height: 42px;
+  white-space: nowrap;
+}
+
+.candidate-profile-form {
+  display: grid;
+  gap: 13px;
+  margin-top: 16px;
+}
+
+.candidate-profile-form textarea {
+  min-height: 340px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
 .hidden {
   display: none;
 }
@@ -1439,6 +1472,10 @@ button:disabled {
   }
 
   .application-modal form {
+    grid-template-columns: 1fr;
+  }
+
+  .candidate-upload-row {
     grid-template-columns: 1fr;
   }
 }

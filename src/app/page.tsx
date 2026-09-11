@@ -36,6 +36,7 @@ const pageMarkup = String.raw`
         <div id="syncStatus">Backend not connected</div>
         <button class="secondary full" id="openSyncBtn" type="button">Connection info</button>
       </div>
+      <button class="secondary full" id="openCandidateProfileBtn" type="button">Candidate CV profile</button>
       <button class="secondary full" id="exportBtn" type="button">Export data</button>
     </aside>
 
@@ -257,6 +258,34 @@ const pageMarkup = String.raw`
       </div>
     </form>
   </aside>
+
+  <div class="modal-backdrop hidden" id="candidateProfileBackdrop"></div>
+  <section class="details-modal candidate-profile-modal hidden" id="candidateProfileModal" aria-labelledby="candidateProfileTitle">
+    <div class="drawer-head">
+      <div>
+        <span class="eyebrow">Evidence source for AI matching</span>
+        <h2 id="candidateProfileTitle">Candidate CV profile</h2>
+      </div>
+      <button class="icon-button" id="closeCandidateProfileBtn" type="button" aria-label="Close">&times;</button>
+    </div>
+    <p class="muted candidate-profile-intro">Upload your master CV as a PDF or text file. JobTrack extracts the content into an editable profile, and every future AI match reads the latest saved version.</p>
+    <div class="candidate-upload-row">
+      <label>Master CV<input id="candidateCvFile" type="file" accept=".pdf,.txt,application/pdf,text/plain" /></label>
+      <button class="secondary" id="uploadCandidateCvBtn" type="button">Upload &amp; extract</button>
+    </div>
+    <div class="file-note" id="candidateCvNote">No master CV loaded yet.</div>
+    <form class="candidate-profile-form" id="candidateProfileForm">
+      <label>
+        Editable CV evidence
+        <textarea id="candidateProfileText" rows="18" minlength="80" maxlength="50000" required placeholder="Upload a CV to extract its text, then review and edit it here..."></textarea>
+      </label>
+      <div class="agent-status hidden" id="candidateProfileMessage" role="status" aria-live="polite"></div>
+      <div class="drawer-actions">
+        <button class="secondary" id="cancelCandidateProfileBtn" type="button">Close</button>
+        <button class="primary" id="saveCandidateProfileBtn" type="submit">Save profile</button>
+      </div>
+    </form>
+  </section>
 
   <div class="modal-backdrop hidden" id="detailsBackdrop"></div>
   <section class="details-modal hidden" id="detailsModal" aria-label="Application details">

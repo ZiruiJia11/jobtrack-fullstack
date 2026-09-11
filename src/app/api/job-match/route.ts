@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { jobMatchAgent } from "@/lib/agent/job-match-agent";
+import { createJobMatchAgent } from "@/lib/agent/job-match-agent";
+import { readCandidateProfile } from "@/lib/candidate-profile-store";
 import { getUserFromRequest } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
@@ -37,6 +38,14 @@ export async function POST(request: Request) {
   const { company, role, jobDescription } = parsed.data;
 
   try {
+    const candidateProfile = await readCandidateProfile(user.id);
+    if (!candidateProfile?.text.trim()) {
+      return NextResponse.json(
+        { error: "Upload and save your candidate CV profile before running AI match analysis." },
+        { status: 409 },
+      );
+    }
+    const jobMatchAgent = createJobMatchAgent(candidateProfile.text);
     const result = await jobMatchAgent.generate({
       prompt: `Company: ${company || "Unknown company"}\nRole: ${role || "Unknown role"}\n\nJob description:\n${jobDescription}`,
     });
@@ -53,6 +62,10 @@ export async function POST(request: Request) {
       report: result.output,
       trace,
       model: process.env.OPENAI_MODEL || "gpt-5.6-luna",
+      candidateProfile: {
+        fileName: candidateProfile.fileName,
+        updatedAt: candidateProfile.updatedAt,
+      },
     });
   } catch (error) {
     console.error("Job match agent failed", error);

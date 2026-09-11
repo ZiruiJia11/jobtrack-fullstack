@@ -32,13 +32,17 @@ Live site: https://jobtrack-fullstack-ashy.vercel.app/
 The match feature is an agentic workflow, not a free-form chatbot:
 
 1. It extracts the important requirements from the job description.
-2. It must call `retrieveCandidateEvidence` to find reviewed CV and portfolio proof.
-3. It must call `assessRequirementGaps` to label requirements as matched, partial, or missing.
+2. It must call `retrieveCandidateEvidence` to find relevant excerpts from the user's latest saved candidate CV profile.
+3. It must call `assessRequirementGaps` to label requirements as matched, partial, or missing using that profile.
 4. It returns a Zod-validated fit report with strengths, gaps, interview questions, next actions, and a cover-letter angle.
 
-The server enforces authentication, input limits, a four-step execution cap, and structured output. Candidate evidence lives in `src/lib/agent/candidate-profile.ts`, so the model cannot silently add unverified claims.
+The server enforces authentication, input limits, a four-step execution cap, and structured output. CV text is treated as untrusted evidence rather than model instructions, and the model is told not to invent claims that are absent from the retrieved excerpts.
 
 Run the analysis directly in the add/edit application form after importing or entering the company, role, and job description. Analysis is read-only: it does not create or update an application, so the user can review the recommendation before choosing **Save**.
+
+### Candidate CV profile
+
+Open **Candidate CV profile** from the sidebar to upload a master CV as PDF or plain text. The server extracts the text, stores the original file and an editable profile in the private `candidate-profiles` Supabase Storage bucket, and allows later text edits or file replacement. Every new match analysis reads the latest saved profile; per-application CV attachments remain separate and are not used as the evidence source.
 
 ## Job URL Import
 
@@ -79,7 +83,7 @@ OPENAI_MODEL=gpt-5.6-luna
 supabase-schema.sql
 ```
 
-The app will create a private Supabase Storage bucket named `application-files` on first CV upload if the service role key has permission. You can also create it manually in Supabase Storage as a private bucket.
+The app will create private Supabase Storage buckets named `application-files` and `candidate-profiles` on first use if the service role key has permission. You can also create them manually in Supabase Storage as private buckets.
 
 4. Create one Supabase Auth user:
 

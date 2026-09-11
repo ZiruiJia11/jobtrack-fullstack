@@ -106,6 +106,15 @@ const els = {
   supabaseAnonKey: document.querySelector("#supabaseAnonKey"),
   syncEmail: document.querySelector("#syncEmail"),
   syncFormNote: document.querySelector("#syncFormNote"),
+  candidateProfileModal: document.querySelector("#candidateProfileModal"),
+  candidateProfileBackdrop: document.querySelector("#candidateProfileBackdrop"),
+  candidateProfileForm: document.querySelector("#candidateProfileForm"),
+  candidateCvFile: document.querySelector("#candidateCvFile"),
+  candidateCvNote: document.querySelector("#candidateCvNote"),
+  candidateProfileText: document.querySelector("#candidateProfileText"),
+  candidateProfileMessage: document.querySelector("#candidateProfileMessage"),
+  uploadCandidateCvBtn: document.querySelector("#uploadCandidateCvBtn"),
+  saveCandidateProfileBtn: document.querySelector("#saveCandidateProfileBtn"),
   agentSubmitBtn: document.querySelector("#agentSubmitBtn"),
   agentStatus: document.querySelector("#agentStatus"),
   agentResult: document.querySelector("#agentResult"),
@@ -1145,6 +1154,110 @@ function escapeHtml(value = "") {
     .replaceAll("'", "&#039;");
 }
 
+function setCandidateProfileMessage(message, type = "info") {
+  els.candidateProfileMessage.textContent = message;
+  els.candidateProfileMessage.dataset.type = type;
+  els.candidateProfileMessage.classList.remove("hidden");
+}
+
+function hideCandidateProfileMessage() {
+  els.candidateProfileMessage.textContent = "";
+  els.candidateProfileMessage.classList.add("hidden");
+}
+
+function renderCandidateProfile(profile) {
+  if (!profile) {
+    els.candidateCvNote.textContent = "No master CV loaded yet. Upload a PDF or text file to create one.";
+    els.candidateCvNote.dataset.type = "";
+    els.candidateProfileText.value = "";
+    return;
+  }
+  const updated = new Date(profile.updatedAt).toLocaleString();
+  els.candidateCvNote.textContent = `${profile.fileName} • ${Math.max(1, Math.round(profile.fileSize / 1024))} KB • updated ${updated}`;
+  els.candidateCvNote.dataset.type = "success";
+  els.candidateProfileText.value = profile.text || "";
+}
+
+async function openCandidateProfile() {
+  els.candidateProfileModal.classList.remove("hidden");
+  els.candidateProfileBackdrop.classList.remove("hidden");
+  hideCandidateProfileMessage();
+  setCandidateProfileMessage("Loading your saved candidate profile…");
+  try {
+    const payload = await apiRequest("/api/candidate-profile");
+    renderCandidateProfile(payload.profile);
+    hideCandidateProfileMessage();
+  } catch (error) {
+    setCandidateProfileMessage(error.message || "The candidate profile could not be loaded.", "error");
+  }
+}
+
+function closeCandidateProfile() {
+  els.candidateProfileModal.classList.add("hidden");
+  els.candidateProfileBackdrop.classList.add("hidden");
+}
+
+async function uploadCandidateCv() {
+  const [file] = els.candidateCvFile.files;
+  if (!file) {
+    setCandidateProfileMessage("Choose a PDF or text CV first.", "warning");
+    return;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    setCandidateProfileMessage("CV file must be 10 MB or smaller.", "warning");
+    return;
+  }
+
+  els.uploadCandidateCvBtn.disabled = true;
+  els.uploadCandidateCvBtn.textContent = "Extracting…";
+  setCandidateProfileMessage("Uploading the private CV and extracting editable text…");
+  try {
+    const headers = await authHeaders(false);
+    if (!headers) throw new Error("Your login session expired. Please sign in again, then retry.");
+    const form = new FormData();
+    form.append("file", file);
+    const response = await fetch("/api/candidate-profile", { method: "POST", headers, body: form });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `Upload failed: ${response.status}`);
+    renderCandidateProfile(payload.profile);
+    els.candidateCvFile.value = "";
+    setCandidateProfileMessage("CV uploaded and extracted. Review the text below; edit it if needed, then save.", "success");
+    resetAgentAnalysis();
+  } catch (error) {
+    setCandidateProfileMessage(error.message || "The CV could not be uploaded.", "error");
+  } finally {
+    els.uploadCandidateCvBtn.disabled = false;
+    els.uploadCandidateCvBtn.textContent = "Upload & extract";
+  }
+}
+
+async function saveCandidateProfile(event) {
+  event.preventDefault();
+  const text = els.candidateProfileText.value.trim();
+  if (text.length < 80) {
+    setCandidateProfileMessage("Keep at least 80 characters of CV evidence before saving.", "warning");
+    return;
+  }
+
+  els.saveCandidateProfileBtn.disabled = true;
+  els.saveCandidateProfileBtn.textContent = "Saving…";
+  setCandidateProfileMessage("Saving the latest editable CV profile…");
+  try {
+    const payload = await apiRequest("/api/candidate-profile", {
+      method: "PUT",
+      body: JSON.stringify({ text }),
+    });
+    renderCandidateProfile(payload.profile);
+    setCandidateProfileMessage("Candidate profile saved. New AI match analyses will use this version.", "success");
+    resetAgentAnalysis();
+  } catch (error) {
+    setCandidateProfileMessage(error.message || "The candidate profile could not be saved.", "error");
+  } finally {
+    els.saveCandidateProfileBtn.disabled = false;
+    els.saveCandidateProfileBtn.textContent = "Save profile";
+  }
+}
+
 function setUrlImportNote(message, type = "info") {
   if (!els.urlImportNote) return;
   els.urlImportNote.textContent = message;
@@ -1368,7 +1481,8 @@ function renderAgentReport(payload) {
     item.textContent = `Step ${entry.step}: ${labels[entry.tool] || entry.tool} — ${entry.status}`;
     els.agentTrace.append(item);
   });
-  els.agentModel.textContent = `Model: ${payload.model || "configured server model"}`;
+  const cvLabel = payload.candidateProfile?.fileName ? ` • CV: ${payload.candidateProfile.fileName}` : "";
+  els.agentModel.textContent = `Model: ${payload.model || "configured server model"}${cvLabel}`;
   els.agentResult.classList.remove("hidden");
 }
 
@@ -1413,6 +1527,12 @@ async function analyseJobMatch() {
 document.querySelector("#openFormBtn").addEventListener("click", () => openDrawer());
 els.importJobUrlBtn.addEventListener("click", importJobUrl);
 els.loginForm.addEventListener("submit", sendLoginLink);
+document.querySelector("#openCandidateProfileBtn").addEventListener("click", openCandidateProfile);
+document.querySelector("#closeCandidateProfileBtn").addEventListener("click", closeCandidateProfile);
+document.querySelector("#cancelCandidateProfileBtn").addEventListener("click", closeCandidateProfile);
+els.candidateProfileBackdrop.addEventListener("click", closeCandidateProfile);
+els.uploadCandidateCvBtn.addEventListener("click", uploadCandidateCv);
+els.candidateProfileForm.addEventListener("submit", saveCandidateProfile);
 els.agentSubmitBtn.addEventListener("click", analyseJobMatch);
 ["company", "role", "jobDescription"].forEach((field) => {
   document.querySelector(`#${field}`).addEventListener("input", () => {
