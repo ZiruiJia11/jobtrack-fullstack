@@ -1195,6 +1195,8 @@ function isExtensionSourceUrl(rawUrl) {
     return (
       hostname === "seek.co.nz" ||
       hostname.endsWith(".seek.co.nz") ||
+      hostname === "seek.com" ||
+      hostname.endsWith(".seek.com") ||
       hostname === "linkedin.com" ||
       hostname.endsWith(".linkedin.com")
     );

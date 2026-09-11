@@ -7,6 +7,8 @@
   "host_permissions": [
     "https://seek.co.nz/*",
     "https://*.seek.co.nz/*",
+    "https://seek.com/*",
+    "https://*.seek.com/*",
     "https://linkedin.com/*",
     "https://*.linkedin.com/*"
   ],

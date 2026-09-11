@@ -334,7 +334,10 @@ export function extractJobDetails(html: string, finalUrl: string) {
   const hostname = new URL(finalUrl).hostname.toLowerCase();
   const source = hostname === "linkedin.com" || hostname.endsWith(".linkedin.com")
     ? "LinkedIn"
-    : hostname === "seek.co.nz" || hostname.endsWith(".seek.co.nz")
+    : hostname === "seek.co.nz" ||
+        hostname.endsWith(".seek.co.nz") ||
+        hostname === "seek.com" ||
+        hostname.endsWith(".seek.com")
       ? "SEEK"
       : "Company Website";
 

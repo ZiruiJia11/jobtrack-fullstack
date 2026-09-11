@@ -18,7 +18,14 @@ function isAllowedJobUrl(rawUrl) {
     const url = new URL(rawUrl);
     if (url.protocol !== "https:") return false;
     const host = url.hostname.toLowerCase();
-    return host === "seek.co.nz" || host.endsWith(".seek.co.nz") || host === "linkedin.com" || host.endsWith(".linkedin.com");
+    return (
+      host === "seek.co.nz" ||
+      host.endsWith(".seek.co.nz") ||
+      host === "seek.com" ||
+      host.endsWith(".seek.com") ||
+      host === "linkedin.com" ||
+      host.endsWith(".linkedin.com")
+    );
   } catch {
     return false;
   }
@@ -148,7 +155,11 @@ function extractJobPage() {
 
   const hostname = location.hostname.toLowerCase();
   const isLinkedIn = hostname === "linkedin.com" || hostname.endsWith(".linkedin.com");
-  const isSeek = hostname === "seek.co.nz" || hostname.endsWith(".seek.co.nz");
+  const isSeek =
+    hostname === "seek.co.nz" ||
+    hostname.endsWith(".seek.co.nz") ||
+    hostname === "seek.com" ||
+    hostname.endsWith(".seek.com");
 
   const title = normalize(
     (typeof jobPosting?.title === "string" && jobPosting.title) ||
