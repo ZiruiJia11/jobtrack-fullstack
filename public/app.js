@@ -106,11 +106,6 @@ const els = {
   supabaseAnonKey: document.querySelector("#supabaseAnonKey"),
   syncEmail: document.querySelector("#syncEmail"),
   syncFormNote: document.querySelector("#syncFormNote"),
-  agentForm: document.querySelector("#agentForm"),
-  agentApplication: document.querySelector("#agentApplication"),
-  agentCompany: document.querySelector("#agentCompany"),
-  agentRole: document.querySelector("#agentRole"),
-  agentJobDescription: document.querySelector("#agentJobDescription"),
   agentSubmitBtn: document.querySelector("#agentSubmitBtn"),
   agentStatus: document.querySelector("#agentStatus"),
   agentResult: document.querySelector("#agentResult"),
@@ -525,32 +520,6 @@ function renderAll() {
   renderDueList();
   renderStaleList();
   renderTimeline();
-  renderAgentApplicationOptions();
-}
-
-function renderAgentApplicationOptions() {
-  if (!els.agentApplication) return;
-  const currentValue = els.agentApplication.value;
-  els.agentApplication.replaceChildren();
-
-  const placeholder = document.createElement("option");
-  placeholder.value = "";
-  placeholder.textContent = "Choose an application or enter one below";
-  els.agentApplication.append(placeholder);
-
-  withoutExamples(applications)
-    .filter((app) => app.company || app.role)
-    .sort((a, b) => `${a.company} ${a.role}`.localeCompare(`${b.company} ${b.role}`))
-    .forEach((app) => {
-      const option = document.createElement("option");
-      option.value = app.id;
-      option.textContent = `${app.company || "Unknown company"} — ${app.role || "Unknown role"}${app.jobDescription ? "" : " (no JD)"}`;
-      els.agentApplication.append(option);
-    });
-
-  if ([...els.agentApplication.options].some((option) => option.value === currentValue)) {
-    els.agentApplication.value = currentValue;
-  }
 }
 
 function setActiveNav(target) {
@@ -584,10 +553,6 @@ function handleNav(target) {
     scrollToSection("#applications");
     return;
   }
-  if (target === "agent") {
-    scrollToSection("#agent");
-    return;
-  }
   if (target === "followups") {
     els.followFilter.value = "week";
     renderRows();
@@ -601,7 +566,7 @@ function handleNav(target) {
 
 function restoreNavFromHash() {
   const target = location.hash.replace("#", "") || "dashboard";
-  if (["dashboard", "applications", "agent", "followups", "analytics"].includes(target)) {
+  if (["dashboard", "applications", "followups", "analytics"].includes(target)) {
     handleNav(target);
   } else {
     setActiveNav("dashboard");
@@ -650,6 +615,7 @@ function openDrawer(app = null) {
       : "Paste a public job URL. SEEK may require the optional browser helper.",
     isBrowserImporterReady() ? "success" : "info",
   );
+  resetAgentAnalysis();
 
   els.drawer.classList.remove("hidden");
   els.drawerBackdrop.classList.remove("hidden");
@@ -1245,6 +1211,7 @@ function requestBrowserImporter(url) {
 }
 
 function applyImportedJob(job, linkInput) {
+  resetAgentAnalysis();
   if (job.finalUrl) linkInput.value = job.finalUrl;
   if (job.company) document.querySelector("#company").value = job.company;
   if (job.title) document.querySelector("#role").value = job.title;
@@ -1311,17 +1278,9 @@ async function importJobUrl() {
   }
 }
 
-function loadApplicationIntoAgent() {
-  const app = applications.find((item) => item.id === els.agentApplication.value);
-  if (!app) return;
-  els.agentCompany.value = app.company || "";
-  els.agentRole.value = app.role || "";
-  els.agentJobDescription.value = app.jobDescription || "";
-  if (!app.jobDescription) {
-    showAgentStatus("This application has no saved job description yet. Paste it below before analysing.", "warning");
-  } else {
-    hideAgentStatus();
-  }
+function resetAgentAnalysis() {
+  els.agentResult.classList.add("hidden");
+  hideAgentStatus();
 }
 
 function showAgentStatus(message, type = "info") {
@@ -1413,9 +1372,14 @@ function renderAgentReport(payload) {
   els.agentResult.classList.remove("hidden");
 }
 
-async function analyseJobMatch(event) {
-  event.preventDefault();
-  const jobDescription = els.agentJobDescription.value.trim();
+async function analyseJobMatch() {
+  const company = document.querySelector("#company").value.trim();
+  const role = document.querySelector("#role").value.trim();
+  const jobDescription = document.querySelector("#jobDescription").value.trim();
+  if (!company || !role) {
+    showAgentStatus("Enter the company and role before analysing the match.", "warning");
+    return;
+  }
   if (jobDescription.length < 80) {
     showAgentStatus("Paste at least 80 characters of the job description so the agent has enough evidence to assess.", "warning");
     return;
@@ -1430,13 +1394,14 @@ async function analyseJobMatch(event) {
     const payload = await apiRequest("/api/job-match", {
       method: "POST",
       body: JSON.stringify({
-        company: els.agentCompany.value.trim(),
-        role: els.agentRole.value.trim(),
+        company,
+        role,
         jobDescription,
       }),
     });
     renderAgentReport(payload);
     hideAgentStatus();
+    els.agentResult.scrollIntoView({ behavior: "smooth", block: "nearest" });
   } catch (error) {
     showAgentStatus(error.message || "The match analysis failed. Please try again.", "error");
   } finally {
@@ -1448,8 +1413,14 @@ async function analyseJobMatch(event) {
 document.querySelector("#openFormBtn").addEventListener("click", () => openDrawer());
 els.importJobUrlBtn.addEventListener("click", importJobUrl);
 els.loginForm.addEventListener("submit", sendLoginLink);
-els.agentApplication.addEventListener("change", loadApplicationIntoAgent);
-els.agentForm.addEventListener("submit", analyseJobMatch);
+els.agentSubmitBtn.addEventListener("click", analyseJobMatch);
+["company", "role", "jobDescription"].forEach((field) => {
+  document.querySelector(`#${field}`).addEventListener("input", () => {
+    if (els.agentResult.classList.contains("hidden")) return;
+    els.agentResult.classList.add("hidden");
+    showAgentStatus("Role details changed. Analyse again to refresh the recommendation.", "warning");
+  });
+});
 document.querySelector("#signOutBtn").addEventListener("click", signOut);
 document.querySelector("#closeFormBtn").addEventListener("click", closeDrawer);
 els.drawerBackdrop.addEventListener("click", closeDrawer);

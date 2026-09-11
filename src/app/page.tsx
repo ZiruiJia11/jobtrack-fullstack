@@ -27,7 +27,6 @@ const pageMarkup = String.raw`
       <nav class="nav-list">
         <a class="nav-item active" href="#dashboard" data-nav="dashboard">Dashboard</a>
         <a class="nav-item" href="#applications" data-nav="applications">Applications</a>
-        <a class="nav-item" href="#agent" data-nav="agent">AI Match Agent</a>
         <a class="nav-item" href="#followups" data-nav="followups">Follow-ups</a>
         <a class="nav-item" href="#analytics" data-nav="analytics">Analytics</a>
       </nav>
@@ -93,77 +92,6 @@ const pageMarkup = String.raw`
           <span class="action-label">Interview motion</span>
           <strong id="interviewCount">0</strong>
           <p>Screening, interview, take-home, or final.</p>
-        </div>
-      </section>
-
-      <section class="agent-panel" id="agent" aria-labelledby="agentTitle">
-        <div class="agent-panel-head">
-          <div>
-            <span class="eyebrow">Tool-using, evidence-grounded analysis</span>
-            <h2 id="agentTitle">AI Match Agent</h2>
-            <p>Compare a role with Steven's verified CV evidence. The agent retrieves relevant proof, checks gaps, and returns a structured recommendation.</p>
-          </div>
-          <span class="agent-badge">OpenAI + AI SDK</span>
-        </div>
-
-        <form class="agent-form" id="agentForm">
-          <label class="agent-application-field">
-            Load a tracked application
-            <select id="agentApplication">
-              <option value="">Choose an application or enter one below</option>
-            </select>
-          </label>
-          <div class="two-col">
-            <label>Company<input id="agentCompany" maxlength="120" placeholder="e.g. Mercury" /></label>
-            <label>Role<input id="agentRole" maxlength="160" placeholder="e.g. Software Engineer" /></label>
-          </div>
-          <label>
-            Job description *
-            <textarea id="agentJobDescription" rows="10" minlength="80" maxlength="20000" required placeholder="Paste the complete job description here..."></textarea>
-          </label>
-          <div class="agent-form-actions">
-            <p class="muted">Your OpenAI key stays on the server. CV evidence is fixed and reviewed rather than generated.</p>
-            <button class="primary" id="agentSubmitBtn" type="submit">Analyse match</button>
-          </div>
-        </form>
-
-        <div class="agent-status hidden" id="agentStatus" role="status" aria-live="polite"></div>
-        <div class="agent-result hidden" id="agentResult" aria-live="polite">
-          <div class="agent-score-card">
-            <div>
-              <span class="action-label">Evidence-based fit</span>
-              <strong id="agentScore">—</strong>
-            </div>
-            <span class="agent-recommendation" id="agentRecommendation"></span>
-          </div>
-          <div class="agent-summary" id="agentSummary"></div>
-          <div class="agent-result-grid">
-            <section>
-              <h3>Verified strengths</h3>
-              <ul class="agent-list" id="agentStrengths"></ul>
-            </section>
-            <section>
-              <h3>Gaps and mitigations</h3>
-              <ul class="agent-list" id="agentGaps"></ul>
-            </section>
-            <section>
-              <h3>Likely interview questions</h3>
-              <ul class="agent-list" id="agentQuestions"></ul>
-            </section>
-            <section>
-              <h3>Next actions</h3>
-              <ul class="agent-list" id="agentActions"></ul>
-            </section>
-          </div>
-          <section class="agent-angle">
-            <h3>Cover-letter angle</h3>
-            <p id="agentCoverLetter"></p>
-          </section>
-          <details class="agent-trace">
-            <summary>Agent tool trace</summary>
-            <ol id="agentTrace"></ol>
-            <p class="muted" id="agentModel"></p>
-          </details>
         </div>
       </section>
 
@@ -265,6 +193,58 @@ const pageMarkup = String.raw`
         <label>Decision date<input id="decisionDate" type="date" /></label>
       </div>
       <label>Job description<textarea id="jobDescription" rows="6" placeholder="Paste the JD here so you can review it later..."></textarea></label>
+      <section class="agent-panel application-agent" aria-labelledby="agentTitle">
+        <div class="agent-panel-head">
+          <div>
+            <span class="eyebrow">Analyse before recording</span>
+            <h2 id="agentTitle">AI match check</h2>
+            <p>Compare the company, role, and JD above with your verified CV evidence before saving this application.</p>
+          </div>
+          <span class="agent-badge">OpenAI + AI SDK</span>
+        </div>
+        <div class="agent-form-actions">
+          <p class="muted">Analysis does not save or change this record. Review the result, then choose whether to save.</p>
+          <button class="secondary" id="agentSubmitBtn" type="button">Analyse match</button>
+        </div>
+        <div class="agent-status hidden" id="agentStatus" role="status" aria-live="polite"></div>
+        <div class="agent-result hidden" id="agentResult" aria-live="polite">
+          <div class="agent-score-card">
+            <div>
+              <span class="action-label">Evidence-based fit</span>
+              <strong id="agentScore">—</strong>
+            </div>
+            <span class="agent-recommendation" id="agentRecommendation"></span>
+          </div>
+          <div class="agent-summary" id="agentSummary"></div>
+          <div class="agent-result-grid">
+            <section>
+              <h3>Verified strengths</h3>
+              <ul class="agent-list" id="agentStrengths"></ul>
+            </section>
+            <section>
+              <h3>Gaps and mitigations</h3>
+              <ul class="agent-list" id="agentGaps"></ul>
+            </section>
+            <section>
+              <h3>Likely interview questions</h3>
+              <ul class="agent-list" id="agentQuestions"></ul>
+            </section>
+            <section>
+              <h3>Next actions</h3>
+              <ul class="agent-list" id="agentActions"></ul>
+            </section>
+          </div>
+          <section class="agent-angle">
+            <h3>Cover-letter angle</h3>
+            <p id="agentCoverLetter"></p>
+          </section>
+          <details class="agent-trace">
+            <summary>Agent tool trace</summary>
+            <ol id="agentTrace"></ol>
+            <p class="muted" id="agentModel"></p>
+          </details>
+        </div>
+      </section>
       <label>CV file<input id="cvFile" type="file" accept=".pdf,.doc,.docx,.txt" /></label>
       <div class="file-note" id="cvFileNote">No CV saved for this application.</div>
       <label>Cover letter text<textarea id="coverLetter" rows="6" placeholder="Paste or draft your CL text here..."></textarea></label>

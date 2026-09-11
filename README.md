@@ -38,6 +38,8 @@ The match feature is an agentic workflow, not a free-form chatbot:
 
 The server enforces authentication, input limits, a four-step execution cap, and structured output. Candidate evidence lives in `src/lib/agent/candidate-profile.ts`, so the model cannot silently add unverified claims.
 
+Run the analysis directly in the add/edit application form after importing or entering the company, role, and job description. Analysis is read-only: it does not create or update an application, so the user can review the recommendation before choosing **Save**.
+
 ## Job URL Import
 
 Paste a public job-page URL into the add/edit form and choose **Import details**. The authenticated server route reads Schema.org `JobPosting` JSON-LD first, then falls back to common job-board metadata and page sections. It classifies the role using deterministic category rules and only prefills the form; nothing is saved until the user reviews and submits it.

@@ -794,6 +794,7 @@ tr:hover td {
 .application-modal form > label:has(textarea),
 .application-modal form > .file-note,
 .application-modal form > .url-import-block,
+.application-modal form > .application-agent,
 .application-modal form > .drawer-actions {
   grid-column: 1 / -1;
 }
@@ -963,6 +964,22 @@ tr:hover td {
     radial-gradient(circle at top right, rgba(37, 99, 235, 0.1), transparent 32%),
     rgba(255, 255, 255, 0.96);
   box-shadow: var(--shadow-soft);
+}
+
+.application-agent {
+  margin: 2px 0 0;
+  padding: 18px;
+  box-shadow: none;
+}
+
+.application-agent .agent-panel-head h2 {
+  font-size: 19px;
+}
+
+.application-agent .agent-form-actions {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
 }
 
 .agent-panel-head,
