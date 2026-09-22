@@ -11,11 +11,11 @@ function safeFileName(name: string) {
 }
 
 async function requireUser(request: Request) {
-  const { user, error } = await getUserFromRequest(request);
+  const { user, isAdmin, error } = await getUserFromRequest(request);
   if (!user) {
-    return { user: null, response: NextResponse.json({ error }, { status: 401 }) };
+    return { user: null, isAdmin: false, response: NextResponse.json({ error }, { status: 401 }) };
   }
-  return { user, response: null };
+  return { user, isAdmin: Boolean(isAdmin), response: null };
 }
 
 async function ensureBucket() {
@@ -38,8 +38,16 @@ function ownsPath(userId: string, path: string) {
   return path.startsWith(`${userId}/`);
 }
 
+function targetUserId(requestedUserId: string, signedInUserId: string, isAdmin: boolean) {
+  if (!requestedUserId || requestedUserId === signedInUserId) return { userId: signedInUserId, response: null };
+  if (!isAdmin) {
+    return { userId: signedInUserId, response: NextResponse.json({ error: "Admin access required" }, { status: 403 }) };
+  }
+  return { userId: requestedUserId, response: null };
+}
+
 export async function POST(request: Request) {
-  const { user, response } = await requireUser(request);
+  const { user, isAdmin, response } = await requireUser(request);
   if (response) return response;
 
   await ensureBucket();
@@ -48,6 +56,8 @@ export async function POST(request: Request) {
   const file = form.get("file");
   const appId = String(form.get("appId") || "");
   const previousPath = String(form.get("previousPath") || "");
+  const target = targetUserId(String(form.get("userId") || ""), user.id, isAdmin);
+  if (target.response) return target.response;
 
   if (!appId) return NextResponse.json({ error: "Missing application id" }, { status: 400 });
   if (!(file instanceof File)) return NextResponse.json({ error: "Missing CV file" }, { status: 400 });
@@ -56,7 +66,7 @@ export async function POST(request: Request) {
   }
 
   const name = safeFileName(file.name);
-  const path = `${user.id}/${appId}/${Date.now()}-${name}`;
+  const path = `${target.userId}/${appId}/${Date.now()}-${name}`;
   const buffer = Buffer.from(await file.arrayBuffer());
 
   const admin = getSupabaseAdmin();
@@ -67,7 +77,7 @@ export async function POST(request: Request) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  if (previousPath && ownsPath(user.id, previousPath)) {
+  if (previousPath && ownsPath(target.userId, previousPath)) {
     await admin.storage.from(BUCKET).remove([previousPath]);
   }
 
@@ -80,13 +90,15 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
-  const { user, response } = await requireUser(request);
+  const { user, isAdmin, response } = await requireUser(request);
   if (response) return response;
 
   const { searchParams } = new URL(request.url);
   const path = searchParams.get("path") || "";
   const downloadName = safeFileName(searchParams.get("name") || "cv");
-  if (!path || !ownsPath(user.id, path)) {
+  const target = targetUserId(searchParams.get("userId") || "", user.id, isAdmin);
+  if (target.response) return target.response;
+  if (!path || !ownsPath(target.userId, path)) {
     return NextResponse.json({ error: "File not found" }, { status: 404 });
   }
 
@@ -100,12 +112,14 @@ export async function GET(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const { user, response } = await requireUser(request);
+  const { user, isAdmin, response } = await requireUser(request);
   if (response) return response;
 
   const { searchParams } = new URL(request.url);
   const path = searchParams.get("path") || "";
-  if (!path || !ownsPath(user.id, path)) {
+  const target = targetUserId(searchParams.get("userId") || "", user.id, isAdmin);
+  if (target.response) return target.response;
+  if (!path || !ownsPath(target.userId, path)) {
     return NextResponse.json({ deleted: false });
   }
 

@@ -8,13 +8,16 @@ const pageMarkup = String.raw`
         <span>JobTrack</span>
       </div>
       <h1>Sign in to your tracker</h1>
-      <p>Use your saved email and password. Your applications are saved through the JobTrack backend.</p>
+      <p>Use your email and password. Each account gets its own private application tracker.</p>
       <form id="loginForm" class="login-form">
-        <label>Email<input id="loginEmail" type="email" value="steven5115115@gmail.com" readonly required /></label>
+        <label>Email<input id="loginEmail" type="email" placeholder="you@example.com" autocomplete="email" required /></label>
         <label>Password<input id="loginPassword" type="password" placeholder="Enter app password" required /></label>
-        <button class="primary" type="submit">Sign in</button>
+        <div class="login-actions">
+          <button class="primary" type="submit">Sign in</button>
+          <button class="secondary" id="signUpBtn" type="button">Create account</button>
+        </div>
       </form>
-      <div class="file-note" id="loginNote">Use the password you set for this Supabase user.</div>
+      <div class="file-note" id="loginNote">New users can create an account. Admin access is controlled by server settings.</div>
     </div>
   </section>
 
@@ -24,28 +27,35 @@ const pageMarkup = String.raw`
         <div class="brand-mark">J</div>
         <span>JobTrack</span>
       </div>
-      <nav class="nav-list">
-        <a class="nav-item active" href="#dashboard" data-nav="dashboard">Dashboard</a>
-        <a class="nav-item" href="#applications" data-nav="applications">Applications</a>
-        <a class="nav-item" href="#followups" data-nav="followups">Follow-ups</a>
-        <a class="nav-item" href="#analytics" data-nav="analytics">Analytics</a>
-      </nav>
-      <div class="quick-stats" id="quickStats"></div>
-      <div class="sync-card">
-        <div class="sync-title">Cloud sync</div>
-        <div id="syncStatus">Backend not connected</div>
-        <button class="secondary full" id="openSyncBtn" type="button">Connection info</button>
-      </div>
-      <button class="secondary full" id="openCandidateProfileBtn" type="button">Candidate CV profile</button>
-      <button class="secondary full" id="exportBtn" type="button">Export data</button>
+      <details class="nav-dropdown" id="navDropdown">
+        <summary>
+          <span id="navMenuLabel">Applications</span>
+          <span class="nav-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="nav-dropdown-panel">
+          <nav class="nav-list">
+            <a class="nav-item active" href="#applications" data-nav="applications">Applications</a>
+            <a class="nav-item" href="#analytics" data-nav="analytics">Analytics</a>
+            <a class="nav-item hidden" href="#admin" data-nav="admin" id="adminNav">Admin</a>
+          </nav>
+          <div class="quick-stats" id="quickStats"></div>
+          <div class="sync-card">
+            <div class="sync-title">Cloud sync</div>
+            <div id="syncStatus">Backend not connected</div>
+            <button class="secondary full" id="openSyncBtn" type="button">Connection info</button>
+          </div>
+          <button class="secondary full" id="openCandidateProfileBtn" type="button">Candidate CV profile</button>
+          <button class="secondary full" id="exportBtn" type="button">Export data</button>
+        </div>
+      </details>
     </aside>
 
-    <main class="main" id="dashboard">
+    <main class="main" id="mainContent">
       <header class="topbar">
         <div>
-          <span class="eyebrow">Personal job search tracker</span>
-          <h1>Job search command center</h1>
-          <p>Plan the next action, keep materials close, and spot quiet applications before they disappear.</p>
+          <span class="eyebrow" id="pageEyebrow">Application records</span>
+          <h1 id="pageTitle">Applications</h1>
+          <p id="pageDescription">Review, filter, and update every role you are tracking.</p>
         </div>
         <div class="topbar-actions">
           <span class="user-chip" id="userChip">Not signed in</span>
@@ -58,45 +68,44 @@ const pageMarkup = String.raw`
         </div>
       </header>
 
-      <section class="toolbar" aria-label="Filters">
-        <label>Status<select id="statusFilter"><option value="all">All statuses</option></select></label>
-        <label>Source<select id="sourceFilter"><option value="all">All sources</option></select></label>
-        <label>Category<select id="categoryFilter"><option value="all">All categories</option></select></label>
-        <label>
-          Follow-up
-          <select id="followFilter">
-            <option value="all">All dates</option>
-            <option value="due">Due now</option>
-            <option value="week">Next 7 days</option>
-            <option value="stale">30+ days quiet</option>
-            <option value="none">No follow-up</option>
-          </select>
-        </label>
-        <label class="search-field">Search<input id="searchInput" type="search" placeholder="Company, role, notes..." /></label>
-        <button class="secondary compact" id="resetFiltersBtn" type="button">Reset</button>
-      </section>
-
-      <section class="action-board" aria-label="Application action summary">
-        <div class="action-card action-card-primary">
-          <div>
-            <span class="action-label">Needs attention</span>
-            <strong id="attentionCount">0</strong>
+      <section class="page-view" data-page="applications" id="applicationsPage">
+        <section class="action-board" aria-label="Application action summary">
+          <div class="action-card action-card-primary">
+            <div>
+              <span class="action-label">Needs attention</span>
+              <strong id="attentionCount">0</strong>
+            </div>
+            <p>Follow-ups due now or applications quiet for 30+ days.</p>
           </div>
-          <p>Follow-ups due now or applications quiet for 30+ days.</p>
-        </div>
-        <div class="action-card">
-          <span class="action-label">Tracked applications</span>
-          <strong id="activeCount">0</strong>
-          <p id="activeSummary">Applications saved in JobTrack.</p>
-        </div>
-        <div class="action-card">
-          <span class="action-label">Interview motion</span>
-          <strong id="interviewCount">0</strong>
-          <p>Screening, interview, take-home, or final.</p>
-        </div>
-      </section>
+          <div class="action-card">
+            <span class="action-label">Tracked applications</span>
+            <strong id="activeCount">0</strong>
+            <p id="activeSummary">Applications saved in JobTrack.</p>
+          </div>
+          <div class="action-card">
+            <span class="action-label">Interview motion</span>
+            <strong id="interviewCount">0</strong>
+            <p>Screening, interview, take-home, or final.</p>
+          </div>
+        </section>
+        <section class="toolbar" aria-label="Filters">
+          <label>Status<select id="statusFilter"><option value="all">All statuses</option></select></label>
+          <label>Source<select id="sourceFilter"><option value="all">All sources</option></select></label>
+          <label>Category<select id="categoryFilter"><option value="all">All categories</option></select></label>
+          <label>
+            Follow-up
+            <select id="followFilter">
+              <option value="all">All dates</option>
+              <option value="due">Due now</option>
+              <option value="week">Next 7 days</option>
+              <option value="stale">30+ days quiet</option>
+              <option value="none">No follow-up</option>
+            </select>
+          </label>
+          <label class="search-field">Search<input id="searchInput" type="search" placeholder="Company, role, notes..." /></label>
+          <button class="secondary compact" id="resetFiltersBtn" type="button">Reset</button>
+        </section>
 
-      <div class="content-grid">
         <section class="table-panel" id="applications">
           <div class="panel-head">
             <h2>Application pipeline</h2>
@@ -106,6 +115,7 @@ const pageMarkup = String.raw`
             <table>
               <thead>
                 <tr>
+                  <th>Actions</th>
                   <th>Company</th>
                   <th>Role</th>
                   <th>Category</th>
@@ -116,15 +126,16 @@ const pageMarkup = String.raw`
                   <th>JD</th>
                   <th>Materials</th>
                   <th>Probability</th>
-                  <th></th>
                 </tr>
               </thead>
               <tbody id="applicationRows"></tbody>
             </table>
           </div>
         </section>
+      </section>
 
-        <aside class="insights" id="analytics">
+      <section class="page-view hidden" data-page="analytics" id="analyticsPage">
+        <div class="analytics-grid" id="analytics">
           <section class="card probability-card">
             <div class="card-title">Success probability</div>
             <div class="probability-number" id="avgProbability">0%</div>
@@ -134,22 +145,34 @@ const pageMarkup = String.raw`
             <div class="card-title">Applications by status</div>
             <div class="status-chart" id="statusChart"></div>
           </section>
-          <section class="card" id="followups">
-            <div class="card-title row-between">Follow-ups due soon <span id="dueCount"></span></div>
-            <ul class="due-list" id="dueList"></ul>
-          </section>
-          <section class="card stale-card" id="staleApplications">
-            <div class="card-title row-between">30+ days quiet <span id="staleCount"></span></div>
-            <p class="muted">Applications with no clear progress for a month. Good candidates for a follow-up, refresh, or archive.</p>
-            <ul class="due-list stale-list" id="staleList"></ul>
-          </section>
-          <section class="card">
+          <section class="card analytics-wide">
             <div class="card-title">Application pace</div>
             <div class="mini-chart" id="timelineChart" aria-label="Applications over time"></div>
             <p class="muted">Applications submitted by month. Use it to see whether your weekly search rhythm is staying steady.</p>
           </section>
-        </aside>
-      </div>
+        </div>
+      </section>
+
+      <section class="page-view hidden" data-page="admin" id="adminPage">
+        <section class="admin-panel hidden" id="adminPanel" aria-label="Admin user management">
+          <div>
+            <span class="eyebrow">Admin</span>
+            <h2>User data console</h2>
+            <p class="muted" id="adminViewingNote">View a user's application records without mixing their data with yours.</p>
+          </div>
+          <div class="admin-controls">
+            <label>User<select id="adminUserSelect"></select></label>
+            <button class="secondary compact" id="adminRefreshBtn" type="button">Refresh users</button>
+          </div>
+          <form class="admin-create-form" id="adminCreateUserForm">
+            <label>New user email<input id="adminNewUserEmail" type="email" placeholder="newuser@example.com" /></label>
+            <label>Temporary password<input id="adminNewUserPassword" type="password" placeholder="At least 6 characters" /></label>
+            <button class="primary compact" type="submit">Create user</button>
+            <div class="file-note" id="adminCreateUserNote">Created users can sign in immediately with this password.</div>
+          </form>
+          <div class="admin-user-list" id="adminUserList"></div>
+        </section>
+      </section>
     </main>
   </div>
 
@@ -322,13 +345,13 @@ const pageMarkup = String.raw`
     </div>
     <div class="sync-help">
       <p>For deployment, set these environment variables in Vercel or Render:</p>
-      <p><code>NEXT_PUBLIC_SUPABASE_URL</code>, <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code>, <code>SUPABASE_SERVICE_ROLE_KEY</code>, <code>JOBTRACK_LOGIN_EMAIL</code>.</p>
-      <p>The service role key must stay server-side only. Do not put it in GitHub.</p>
+      <p><code>NEXT_PUBLIC_SUPABASE_URL</code>, <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code>, <code>SUPABASE_SERVICE_ROLE_KEY</code>, <code>JOBTRACK_ADMIN_EMAILS</code>.</p>
+      <p>The service role key must stay server-side only. Admin emails are comma-separated.</p>
     </div>
     <form id="syncForm" class="sync-form">
       <label>Supabase Project URL<input id="supabaseUrl" type="url" readonly /></label>
       <label>Anon public key<textarea id="supabaseAnonKey" rows="4" readonly></textarea></label>
-      <label>Login email<input id="syncEmail" type="email" readonly /></label>
+      <label>Signed-in email<input id="syncEmail" type="email" readonly /></label>
       <div class="file-note" id="syncFormNote">Connection is controlled by deployment environment variables.</div>
       <div class="drawer-actions">
         <button class="secondary" id="clearSyncBtn" type="button">Close</button>
@@ -345,7 +368,10 @@ export default function Home() {
   const publicConfig = {
     supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL || "https://pexthgxqandoeesqbelb.supabase.co",
     supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || defaultAnonKey,
-    loginEmail: process.env.JOBTRACK_LOGIN_EMAIL || "steven5115115@gmail.com",
+    adminEmails: (process.env.JOBTRACK_ADMIN_EMAILS || process.env.JOBTRACK_LOGIN_EMAIL || "steven5115115@gmail.com")
+      .split(",")
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean),
   };
 
   return (

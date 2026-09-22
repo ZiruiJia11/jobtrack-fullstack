@@ -31,36 +31,52 @@ function rowFromApplication(app: ApplicationPayload, userId: string) {
 }
 
 async function requireUser(request: Request) {
-  const { user, error } = await getUserFromRequest(request);
+  const { user, isAdmin, error } = await getUserFromRequest(request);
   if (!user) {
-    return { user: null, response: NextResponse.json({ error }, { status: 401 }) };
+    return { user: null, isAdmin: false, response: NextResponse.json({ error }, { status: 401 }) };
   }
-  return { user, response: null };
+  return { user, isAdmin: Boolean(isAdmin), response: null };
+}
+
+function targetUserId(request: Request, signedInUserId: string, isAdmin: boolean) {
+  const { searchParams } = new URL(request.url);
+  const requestedUserId = searchParams.get("userId");
+  if (!requestedUserId || requestedUserId === signedInUserId) return { userId: signedInUserId, response: null };
+  if (!isAdmin) {
+    return { userId: signedInUserId, response: NextResponse.json({ error: "Admin access required" }, { status: 403 }) };
+  }
+  return { userId: requestedUserId, response: null };
 }
 
 export async function GET(request: Request) {
-  const { user, response } = await requireUser(request);
+  const { user, isAdmin, response } = await requireUser(request);
   if (response) return response;
+  const target = targetUserId(request, user.id, isAdmin);
+  if (target.response) return target.response;
 
   const { data, error } = await getSupabaseAdmin()
     .from(TABLE_NAME)
     .select("*")
-    .eq("user_id", user.id)
+    .eq("user_id", target.userId)
     .order("updated_at", { ascending: false });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ applications: data || [] });
+  return NextResponse.json({ applications: data || [], ownerUserId: target.userId });
 }
 
 export async function POST(request: Request) {
-  const { user, response } = await requireUser(request);
+  const { user, isAdmin, response } = await requireUser(request);
   if (response) return response;
 
   const body = await request.json().catch(() => null);
   const applications = Array.isArray(body?.applications) ? body.applications : [];
   if (applications.length === 0) return NextResponse.json({ saved: 0 });
+  const requestedUserId = typeof body?.userId === "string" ? body.userId : user.id;
+  if (requestedUserId !== user.id && !isAdmin) {
+    return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+  }
 
-  const rows = applications.map((app: ApplicationPayload) => rowFromApplication(app, user.id));
+  const rows = applications.map((app: ApplicationPayload) => rowFromApplication(app, requestedUserId));
   const { error } = await getSupabaseAdmin().from(TABLE_NAME).upsert(rows, { onConflict: "id" });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
@@ -68,14 +84,16 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const { user, response } = await requireUser(request);
+  const { user, isAdmin, response } = await requireUser(request);
   if (response) return response;
+  const target = targetUserId(request, user.id, isAdmin);
+  if (target.response) return target.response;
 
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
   if (!id) return NextResponse.json({ error: "Missing application id" }, { status: 400 });
 
-  const { error } = await getSupabaseAdmin().from(TABLE_NAME).delete().eq("user_id", user.id).eq("id", id);
+  const { error } = await getSupabaseAdmin().from(TABLE_NAME).delete().eq("user_id", target.userId).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   return NextResponse.json({ deleted: id });

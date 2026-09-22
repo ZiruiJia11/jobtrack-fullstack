@@ -39,17 +39,39 @@ const STORAGE_KEY = "jobtrack.applications.v2";
 const LEGACY_STORAGE_KEY = "jobtrack.applications.v1";
 const SUPABASE_CONFIG_KEY = "jobtrack.supabase.config.v1";
 const TABLE_NAME = "applications";
+const PAGE_COPY = {
+  applications: {
+    eyebrow: "Application records",
+    title: "Applications",
+    description: "Review, filter, and update every role you are tracking.",
+  },
+  analytics: {
+    eyebrow: "Search insights",
+    title: "Analytics",
+    description: "Understand your application outcomes, status mix, and search pace.",
+  },
+  admin: {
+    eyebrow: "Administration",
+    title: "User management",
+    description: "Manage accounts and review each user's records separately.",
+  },
+};
 const RUNTIME_CONFIG = window.JOBTRACK_CONFIG || {};
-const LOGIN_EMAIL = RUNTIME_CONFIG.loginEmail || "steven5115115@gmail.com";
+const ADMIN_EMAILS = (RUNTIME_CONFIG.adminEmails || ["steven5115115@gmail.com"]).map((email) =>
+  String(email).toLowerCase(),
+);
 const DEFAULT_SUPABASE_CONFIG = {
   url: RUNTIME_CONFIG.supabaseUrl || "https://pexthgxqandoeesqbelb.supabase.co",
   anonKey: RUNTIME_CONFIG.supabaseAnonKey || "",
 };
 
-let applications = loadApplications();
+let applications = [];
 let supabaseConfig = loadSupabaseConfig() || DEFAULT_SUPABASE_CONFIG;
 let supabaseClient = null;
 let currentUser = null;
+let activeDataUserId = "";
+let activeDataUserEmail = "";
+let adminUsers = [];
 let isSyncing = false;
 
 const els = {
@@ -59,6 +81,12 @@ const els = {
   loginEmail: document.querySelector("#loginEmail"),
   loginPassword: document.querySelector("#loginPassword"),
   loginNote: document.querySelector("#loginNote"),
+  signUpBtn: document.querySelector("#signUpBtn"),
+  navDropdown: document.querySelector("#navDropdown"),
+  navMenuLabel: document.querySelector("#navMenuLabel"),
+  pageEyebrow: document.querySelector("#pageEyebrow"),
+  pageTitle: document.querySelector("#pageTitle"),
+  pageDescription: document.querySelector("#pageDescription"),
   userChip: document.querySelector("#userChip"),
   rows: document.querySelector("#applicationRows"),
   resultCount: document.querySelector("#resultCount"),
@@ -72,8 +100,6 @@ const els = {
   avgProbability: document.querySelector("#avgProbability"),
   probabilityNote: document.querySelector("#probabilityNote"),
   statusChart: document.querySelector("#statusChart"),
-  dueList: document.querySelector("#dueList"),
-  dueCount: document.querySelector("#dueCount"),
   timelineChart: document.querySelector("#timelineChart"),
   drawer: document.querySelector("#drawer"),
   drawerBackdrop: document.querySelector("#drawerBackdrop"),
@@ -96,8 +122,6 @@ const els = {
   activeCount: document.querySelector("#activeCount"),
   activeSummary: document.querySelector("#activeSummary"),
   interviewCount: document.querySelector("#interviewCount"),
-  staleCount: document.querySelector("#staleCount"),
-  staleList: document.querySelector("#staleList"),
   syncStatus: document.querySelector("#syncStatus"),
   syncModal: document.querySelector("#syncModal"),
   syncBackdrop: document.querySelector("#syncBackdrop"),
@@ -128,6 +152,16 @@ const els = {
   agentCoverLetter: document.querySelector("#agentCoverLetter"),
   agentTrace: document.querySelector("#agentTrace"),
   agentModel: document.querySelector("#agentModel"),
+  adminNav: document.querySelector("#adminNav"),
+  adminPanel: document.querySelector("#adminPanel"),
+  adminUserSelect: document.querySelector("#adminUserSelect"),
+  adminRefreshBtn: document.querySelector("#adminRefreshBtn"),
+  adminUserList: document.querySelector("#adminUserList"),
+  adminViewingNote: document.querySelector("#adminViewingNote"),
+  adminCreateUserForm: document.querySelector("#adminCreateUserForm"),
+  adminNewUserEmail: document.querySelector("#adminNewUserEmail"),
+  adminNewUserPassword: document.querySelector("#adminNewUserPassword"),
+  adminCreateUserNote: document.querySelector("#adminCreateUserNote"),
 };
 
 function normalizeApplication(app) {
@@ -168,6 +202,29 @@ function normalizeApplications(items) {
   return (items || []).map(normalizeApplication);
 }
 
+function applicationFromRow(row) {
+  return normalizeApplication({
+    id: row.id,
+    ...row,
+    ...row.payload,
+  });
+}
+
+function rowFromApplication(app, userId) {
+  return {
+    id: app.id,
+    user_id: userId,
+    company: app.company || "",
+    role: app.role || "",
+    category: app.category || "Other",
+    status: app.status || "Applied",
+    applied_date: app.appliedDate || null,
+    follow_up_date: app.followUpDate || null,
+    payload: app,
+    updated_at: app.updatedAt || new Date().toISOString(),
+  };
+}
+
 function isExampleApplication(app) {
   return (
     app?.isExample === true ||
@@ -199,10 +256,19 @@ function daysUntil(value) {
   return Math.ceil((date - now) / 86400000);
 }
 
-function loadApplications() {
+function cacheKeyForUser(userId) {
+  return userId ? `${STORAGE_KEY}.${userId}` : STORAGE_KEY;
+}
+
+function isCurrentAdmin() {
+  return Boolean(currentUser?.email && ADMIN_EMAILS.includes(currentUser.email.toLowerCase()));
+}
+
+function loadApplicationsForUser(userId, userEmail = "") {
   try {
-    const current = localStorage.getItem(STORAGE_KEY);
-    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+    const current = localStorage.getItem(cacheKeyForUser(userId));
+    const canUseLegacy = userEmail && ADMIN_EMAILS.includes(userEmail.toLowerCase());
+    const legacy = canUseLegacy ? localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY) : null;
     return normalizeApplications(JSON.parse(current || legacy) || []);
   } catch {
     return [];
@@ -210,7 +276,9 @@ function loadApplications() {
 }
 
 function saveApplications({ skipCloud = false } = {}) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(withoutExamples(applications)));
+  if (activeDataUserId) {
+    localStorage.setItem(cacheKeyForUser(activeDataUserId), JSON.stringify(withoutExamples(applications)));
+  }
   if (!skipCloud) syncAllToBackend();
 }
 
@@ -325,6 +393,12 @@ function renderRows() {
         : "-";
       return `
         <tr>
+          <td class="actions-cell">
+            <div class="row-actions">
+              <button class="edit-btn edit-btn-primary" type="button" data-edit="${app.id}">Edit</button>
+              <button class="edit-btn" type="button" data-view="${app.id}">View</button>
+            </div>
+          </td>
           <td class="company-cell">${escapeHtml(app.company)}<span>${escapeHtml(app.source || "No source")}</span></td>
           <td>${escapeHtml(app.role)}</td>
           <td>${escapeHtml(app.category || "Other")}</td>
@@ -338,12 +412,6 @@ function renderRows() {
             <div class="probability-bar">
               <strong>${probability}%</strong>
               <div class="bar-track"><div class="bar-fill" style="width:${probability}%"></div></div>
-            </div>
-          </td>
-          <td>
-            <div class="row-actions">
-              <button class="edit-btn" type="button" data-view="${app.id}">View</button>
-              <button class="edit-btn" type="button" data-edit="${app.id}">Edit</button>
             </div>
           </td>
         </tr>
@@ -418,30 +486,6 @@ function renderStatusChart() {
           .join("");
 }
 
-function renderDueList() {
-  const due = withoutExamples(applications)
-    .filter((app) => {
-      const days = daysUntil(app.followUpDate);
-      return days !== null && days <= 7 && !["Offer", "Rejected", "Withdrawn"].includes(app.status);
-    })
-    .sort((a, b) => (a.followUpDate || "").localeCompare(b.followUpDate || ""))
-    .slice(0, 6);
-  els.dueCount.textContent = `${due.length}`;
-  els.dueList.innerHTML =
-    due.length === 0
-      ? `<li class="muted">No follow-ups due in the next 7 days.</li>`
-      : due
-          .map(
-            (app) => `
-            <li>
-              <span>${escapeHtml(app.company)} - ${escapeHtml(app.role)}</span>
-              <span class="due-date">${formatDate(app.followUpDate)}</span>
-            </li>
-          `,
-          )
-          .join("");
-}
-
 function isStaleApplication(app) {
   if (!app.appliedDate || ["Offer", "Rejected", "Withdrawn"].includes(app.status)) return false;
   if (app.screenDate || app.interviewDate || app.finalDate || app.decisionDate) return false;
@@ -452,27 +496,6 @@ function staleApplications() {
   return withoutExamples(applications)
     .filter(isStaleApplication)
     .sort((a, b) => daysBetween(b.appliedDate) - daysBetween(a.appliedDate));
-}
-
-function renderStaleList() {
-  if (!els.staleList || !els.staleCount) return;
-  const allStale = staleApplications();
-  const stale = allStale.slice(0, 6);
-  els.staleCount.textContent = `${allStale.length}`;
-  els.staleList.innerHTML =
-    stale.length === 0
-      ? `<li class="muted">No applications have gone quiet for 30+ days.</li>`
-      : stale
-          .map((app) => {
-            const age = daysBetween(app.appliedDate);
-            return `
-              <li>
-                <span>${escapeHtml(app.company)} - ${escapeHtml(app.role)}<small>${age} days since applied</small></span>
-                <button class="text-button" type="button" data-edit="${app.id}">Plan follow-up</button>
-              </li>
-            `;
-          })
-          .join("");
 }
 
 function renderTimeline() {
@@ -526,19 +549,28 @@ function renderAll() {
   renderRows();
   renderStats();
   renderStatusChart();
-  renderDueList();
-  renderStaleList();
   renderTimeline();
+  renderAdminUsers();
 }
 
 function setActiveNav(target) {
+  const activeTarget = target === "admin" && !isCurrentAdmin() ? "applications" : target;
   document.querySelectorAll(".nav-item").forEach((item) => {
-    item.classList.toggle("active", item.dataset.nav === target);
+    item.classList.toggle("active", item.dataset.nav === activeTarget);
   });
-}
+  document.querySelectorAll(".page-view").forEach((page) => {
+    page.classList.toggle("hidden", page.dataset.page !== activeTarget);
+  });
 
-function scrollToSection(selector) {
-  document.querySelector(selector)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const copy = PAGE_COPY[activeTarget] || PAGE_COPY.applications;
+  els.pageEyebrow.textContent = copy.eyebrow;
+  els.pageTitle.textContent = copy.title;
+  els.pageDescription.textContent = copy.description;
+  els.navMenuLabel.textContent = copy.title;
+  els.navDropdown.open = false;
+  document.title = `${copy.title} | JobTrack`;
+  window.scrollTo({ top: 0, behavior: "auto" });
+  return activeTarget;
 }
 
 function resetFilters() {
@@ -551,34 +583,21 @@ function resetFilters() {
 }
 
 function handleNav(target) {
-  setActiveNav(target);
-  if (target === "dashboard") {
-    resetFilters();
-    scrollToSection("#dashboard");
-    return;
-  }
-  if (target === "applications") {
-    resetFilters();
-    scrollToSection("#applications");
-    return;
-  }
-  if (target === "followups") {
-    els.followFilter.value = "week";
-    renderRows();
-    scrollToSection("#followups");
-    return;
-  }
-  if (target === "analytics") {
-    scrollToSection("#analytics");
-  }
+  const activeTarget = setActiveNav(target);
+  if (activeTarget === "admin") loadAdminUsers();
+  return activeTarget;
 }
 
 function restoreNavFromHash() {
-  const target = location.hash.replace("#", "") || "dashboard";
-  if (["dashboard", "applications", "followups", "analytics"].includes(target)) {
-    handleNav(target);
+  const rawTarget = location.hash.replace("#", "") || "applications";
+  const legacyTarget = ["dashboard", "followups"].includes(rawTarget) ? "applications" : rawTarget;
+  const target = legacyTarget === "adminPanel" ? "admin" : legacyTarget;
+  if (["applications", "analytics", "admin"].includes(target)) {
+    const activeTarget = handleNav(target);
+    if (location.hash !== `#${activeTarget}`) history.replaceState(null, "", `#${activeTarget}`);
   } else {
-    setActiveNav("dashboard");
+    handleNav("applications");
+    history.replaceState(null, "", "#applications");
   }
 }
 
@@ -750,6 +769,7 @@ async function uploadMaterialFile(appId, file, previousPath = "", label = "file"
   formData.append("appId", appId);
   formData.append("file", file);
   formData.append("previousPath", previousPath);
+  if (activeDataUserId) formData.append("userId", activeDataUserId);
 
   const response = await fetch("/api/cv", {
     method: "POST",
@@ -887,8 +907,11 @@ async function initSupabase() {
   }
   currentUser = initialSession?.user || null;
   if (currentUser) {
+    setActiveDataUser(currentUser.id, currentUser.email || "Current user");
     setAuthView(true);
+    restoreNavFromHash();
     updateSyncStatus(`Signed in: ${currentUser.email || "anonymous user"}`);
+    if (isCurrentAdmin()) await loadAdminUsers();
     await loadFromBackend();
     await syncAllToBackend();
   } else {
@@ -898,21 +921,128 @@ async function initSupabase() {
 
   supabaseClient.auth.onAuthStateChange(async (_event, session) => {
     currentUser = session?.user || null;
+    if (currentUser) setActiveDataUser(currentUser.id, currentUser.email || "Current user");
     setAuthView(Boolean(currentUser));
     if (currentUser) {
+      restoreNavFromHash();
       updateSyncStatus(`Signed in: ${currentUser.email || "anonymous user"}`);
+      if (isCurrentAdmin()) await loadAdminUsers();
       await loadFromBackend();
       await syncAllToBackend();
     } else {
+      activeDataUserId = "";
+      activeDataUserEmail = "";
+      adminUsers = [];
+      applications = [];
+      renderAll();
       updateSyncStatus("Signed out");
     }
   });
 }
 
+function setActiveDataUser(userId, email) {
+  activeDataUserId = userId || currentUser?.id || "";
+  activeDataUserEmail = email || currentUser?.email || "";
+  applications = loadApplicationsForUser(activeDataUserId, activeDataUserEmail);
+  setAuthView(Boolean(currentUser));
+  renderAll();
+}
+
 function setAuthView(isSignedIn) {
   els.loginScreen.classList.toggle("hidden", isSignedIn);
   els.appShell.classList.toggle("app-locked", !isSignedIn);
-  els.userChip.textContent = currentUser?.email || "Not signed in";
+  els.userChip.textContent = activeDataUserEmail
+    ? `${activeDataUserEmail}${activeDataUserId !== currentUser?.id ? " (viewing)" : ""}`
+    : currentUser?.email || "Not signed in";
+  els.adminNav?.classList.toggle("hidden", !isCurrentAdmin());
+  els.adminPanel?.classList.toggle("hidden", !isCurrentAdmin());
+}
+
+function renderAdminUsers() {
+  if (!els.adminUserSelect || !els.adminUserList) return;
+  const users = adminUsers.length
+    ? adminUsers
+    : currentUser
+      ? [
+          {
+            id: currentUser.id,
+            email: currentUser.email || "Current user",
+            applicationCount: withoutExamples(applications).length,
+          },
+        ]
+      : [];
+
+  els.adminUserSelect.innerHTML = users
+    .map(
+      (user) =>
+        `<option value="${escapeHtml(user.id)}" ${user.id === activeDataUserId ? "selected" : ""}>${escapeHtml(user.email)} (${user.applicationCount || 0})</option>`,
+    )
+    .join("");
+
+  els.adminUserList.innerHTML = users
+    .map(
+      (user) => `
+        <button class="admin-user ${user.id === activeDataUserId ? "active" : ""}" type="button" data-user-id="${escapeHtml(user.id)}">
+          <span>${escapeHtml(user.email)}</span>
+          <strong>${user.applicationCount || 0} apps</strong>
+        </button>
+      `,
+    )
+    .join("");
+
+  if (els.adminViewingNote) {
+    els.adminViewingNote.textContent =
+      activeDataUserId === currentUser?.id
+        ? "Viewing your own application data."
+        : `Viewing ${activeDataUserEmail || "selected user"} as admin.`;
+  }
+}
+
+async function loadAdminUsers() {
+  if (!isCurrentAdmin()) return;
+  try {
+    const data = await apiRequest("/api/admin/users");
+    adminUsers = data.users || [];
+    renderAdminUsers();
+  } catch (error) {
+    adminUsers = [];
+    renderAdminUsers();
+    updateSyncStatus(`Admin user list error: ${error.message}`);
+  }
+}
+
+async function viewAdminUser(userId) {
+  if (!isCurrentAdmin()) return;
+  const user = adminUsers.find((item) => item.id === userId);
+  setActiveDataUser(userId, user?.email || "Selected user");
+  await loadFromBackend();
+  renderAdminUsers();
+}
+
+async function createAdminUser(event) {
+  event.preventDefault();
+  if (!isCurrentAdmin()) return;
+  const email = els.adminNewUserEmail.value.trim().toLowerCase();
+  const password = els.adminNewUserPassword.value;
+  if (!email || password.length < 6) {
+    els.adminCreateUserNote.textContent = "Use a valid email and a password with at least 6 characters.";
+    els.adminCreateUserNote.classList.add("warning");
+    return;
+  }
+  els.adminCreateUserNote.textContent = "Creating user...";
+  els.adminCreateUserNote.classList.remove("warning");
+  try {
+    const data = await apiRequest("/api/admin/users", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+    els.adminCreateUserForm.reset();
+    els.adminCreateUserNote.textContent = `Created ${data.user.email}. They can sign in now.`;
+    await loadAdminUsers();
+  } catch (error) {
+    els.adminCreateUserNote.textContent = `Create user error: ${error.message}`;
+    els.adminCreateUserNote.classList.add("warning");
+  }
 }
 
 function updateSyncStatus(message) {
@@ -960,29 +1090,68 @@ async function apiRequest(path, options = {}) {
   return payload;
 }
 
+function canUseDirectOwnData() {
+  return Boolean(supabaseClient && currentUser && activeDataUserId === currentUser.id);
+}
+
+async function loadDirectOwnData() {
+  if (!canUseDirectOwnData()) throw new Error("Direct data access is only available for your own account.");
+  const { data, error } = await supabaseClient
+    .from(TABLE_NAME)
+    .select("*")
+    .eq("user_id", currentUser.id)
+    .order("updated_at", { ascending: false });
+  if (error) throw error;
+  return (data || []).map(applicationFromRow);
+}
+
+async function syncDirectOwnData(realApps) {
+  if (!canUseDirectOwnData()) throw new Error("Direct data sync is only available for your own account.");
+  if (realApps.length === 0) return { saved: 0 };
+  const rows = realApps.map((app) => rowFromApplication(app, currentUser.id));
+  const { error } = await supabaseClient.from(TABLE_NAME).upsert(rows, { onConflict: "id" });
+  if (error) throw error;
+  return { saved: rows.length };
+}
+
+async function deleteDirectOwnData(id) {
+  if (!canUseDirectOwnData()) throw new Error("Direct delete is only available for your own account.");
+  const { error } = await supabaseClient.from(TABLE_NAME).delete().eq("user_id", currentUser.id).eq("id", id);
+  if (error) throw error;
+}
+
 async function loadFromBackend() {
   if (!supabaseClient || !currentUser) return;
   updateSyncStatus("Loading backend data...");
   let data;
+  let loadedCloudApps;
   try {
-    data = await apiRequest("/api/applications");
+    const userQuery =
+      isCurrentAdmin() && activeDataUserId && activeDataUserId !== currentUser.id
+        ? `?userId=${encodeURIComponent(activeDataUserId)}`
+        : "";
+    data = await apiRequest(`/api/applications${userQuery}`);
+    loadedCloudApps = normalizeApplications((data.applications || []).map(applicationFromRow));
   } catch (error) {
-    updateSyncStatus(`Sync error: ${error.message}`);
-    return;
+    if (!canUseDirectOwnData()) {
+      updateSyncStatus(`Sync error: ${error.message}`);
+      return;
+    }
+    try {
+      loadedCloudApps = await loadDirectOwnData();
+      updateSyncStatus("Loaded with direct Supabase access for local testing.");
+    } catch (directError) {
+      updateSyncStatus(`Sync error: ${directError.message}`);
+      return;
+    }
   }
 
-  const loadedCloudApps = normalizeApplications(
-    (data.applications || []).map((row) => ({
-      id: row.id,
-      ...row,
-      ...row.payload,
-    })),
-  );
   const cloudApps = withoutExamples(loadedCloudApps);
   await deleteExampleRowsFromBackend(loadedCloudApps.filter(isExampleApplication));
-  applications = mergeApplications(applications, cloudApps);
+  const localApps = loadApplicationsForUser(activeDataUserId, activeDataUserEmail);
+  applications = mergeApplications(localApps, cloudApps);
   saveApplications({ skipCloud: true });
-  updateSyncStatus(`Synced ${withoutExamples(applications).length} apps`);
+  updateSyncStatus(`Synced ${withoutExamples(applications).length} apps for ${activeDataUserEmail || "this user"}`);
   renderAll();
 }
 
@@ -1003,9 +1172,15 @@ function withoutExamples(items) {
 
 async function deleteExampleRowsFromBackend(exampleApps) {
   if (!exampleApps.length) return;
+  const userQuery =
+    isCurrentAdmin() && activeDataUserId && activeDataUserId !== currentUser?.id
+      ? `&userId=${encodeURIComponent(activeDataUserId)}`
+      : "";
   await Promise.all(
     exampleApps.map((app) =>
-      apiRequest(`/api/applications?id=${encodeURIComponent(app.id)}`, { method: "DELETE" }).catch(() => null),
+      apiRequest(`/api/applications?id=${encodeURIComponent(app.id)}${userQuery}`, { method: "DELETE" }).catch(
+        () => null,
+      ),
     ),
   );
 }
@@ -1017,30 +1192,55 @@ async function syncAllToBackend() {
   try {
     await apiRequest("/api/applications", {
       method: "POST",
-      body: JSON.stringify({ applications: realApps }),
+      body: JSON.stringify({ applications: realApps, userId: activeDataUserId || currentUser.id }),
     });
-    updateSyncStatus(`Synced ${realApps.length} apps`);
+    updateSyncStatus(`Synced ${realApps.length} apps for ${activeDataUserEmail || "this user"}`);
   } catch (error) {
-    updateSyncStatus(`Sync error: ${error.message}`);
+    if (!canUseDirectOwnData()) {
+      updateSyncStatus(`Sync error: ${error.message}`);
+    } else {
+      try {
+        await syncDirectOwnData(realApps);
+        updateSyncStatus(`Synced ${realApps.length} apps with direct Supabase access.`);
+      } catch (directError) {
+        updateSyncStatus(`Sync error: ${directError.message}`);
+      }
+    }
   }
   isSyncing = false;
 }
 
 async function deleteFromCloud(id) {
   if (!supabaseClient || !currentUser) return;
+  const userQuery =
+    isCurrentAdmin() && activeDataUserId && activeDataUserId !== currentUser.id
+      ? `&userId=${encodeURIComponent(activeDataUserId)}`
+      : "";
   try {
-    await apiRequest(`/api/applications?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    await apiRequest(`/api/applications?id=${encodeURIComponent(id)}${userQuery}`, { method: "DELETE" });
   } catch (error) {
-    updateSyncStatus(`Delete sync error: ${error.message}`);
+    if (!canUseDirectOwnData()) {
+      updateSyncStatus(`Delete sync error: ${error.message}`);
+    } else {
+      try {
+        await deleteDirectOwnData(id);
+      } catch (directError) {
+        updateSyncStatus(`Delete sync error: ${directError.message}`);
+      }
+    }
   }
 }
 
 async function downloadCvFile(appId) {
   const app = applications.find((item) => item.id === appId);
   if (!app?.cvStoragePath) return;
+  const userQuery =
+    isCurrentAdmin() && activeDataUserId && activeDataUserId !== currentUser?.id
+      ? `&userId=${encodeURIComponent(activeDataUserId)}`
+      : "";
   try {
     const data = await apiRequest(
-      `/api/cv?path=${encodeURIComponent(app.cvStoragePath)}&name=${encodeURIComponent(app.cvFileName || "cv")}`,
+      `/api/cv?path=${encodeURIComponent(app.cvStoragePath)}&name=${encodeURIComponent(app.cvFileName || "cv")}${userQuery}`,
     );
     window.location.href = data.signedUrl;
   } catch (error) {
@@ -1051,9 +1251,13 @@ async function downloadCvFile(appId) {
 async function downloadClFile(appId) {
   const app = applications.find((item) => item.id === appId);
   if (!app?.clStoragePath) return;
+  const userQuery =
+    isCurrentAdmin() && activeDataUserId && activeDataUserId !== currentUser?.id
+      ? `&userId=${encodeURIComponent(activeDataUserId)}`
+      : "";
   try {
     const data = await apiRequest(
-      `/api/cv?path=${encodeURIComponent(app.clStoragePath)}&name=${encodeURIComponent(app.clFileName || "cover-letter")}`,
+      `/api/cv?path=${encodeURIComponent(app.clStoragePath)}&name=${encodeURIComponent(app.clFileName || "cover-letter")}${userQuery}`,
     );
     window.location.href = data.signedUrl;
   } catch (error) {
@@ -1063,8 +1267,12 @@ async function downloadClFile(appId) {
 
 async function deleteCvFile(path) {
   if (!path || !supabaseClient || !currentUser) return;
+  const userQuery =
+    isCurrentAdmin() && activeDataUserId && activeDataUserId !== currentUser.id
+      ? `&userId=${encodeURIComponent(activeDataUserId)}`
+      : "";
   try {
-    await apiRequest(`/api/cv?path=${encodeURIComponent(path)}`, { method: "DELETE" });
+    await apiRequest(`/api/cv?path=${encodeURIComponent(path)}${userQuery}`, { method: "DELETE" });
   } catch (error) {
     updateSyncStatus(`CV delete error: ${error.message}`);
   }
@@ -1073,7 +1281,7 @@ async function deleteCvFile(path) {
 function openSyncModal() {
   els.supabaseUrl.value = supabaseConfig?.url || "";
   els.supabaseAnonKey.value = supabaseConfig?.anonKey || "";
-  els.syncEmail.value = LOGIN_EMAIL;
+  els.syncEmail.value = currentUser?.email || "";
   els.syncEmail.readOnly = true;
   els.syncFormNote.textContent = "This fullstack version uses deployment environment variables.";
   els.syncModal.classList.remove("hidden");
@@ -1093,7 +1301,7 @@ async function saveSyncSettings(event) {
     updateSyncStatus("Supabase config missing");
     return;
   }
-  els.syncFormNote.textContent = `Connection ready for ${LOGIN_EMAIL}.`;
+  els.syncFormNote.textContent = `Connection ready for ${currentUser?.email || "signed-in user"}.`;
   els.syncFormNote.classList.remove("warning");
   updateSyncStatus("Backend connection refreshed.");
 }
@@ -1108,8 +1316,13 @@ async function sendLoginLink(event) {
       return;
     }
   }
-  const email = LOGIN_EMAIL;
+  const email = els.loginEmail.value.trim().toLowerCase();
   const password = els.loginPassword.value;
+  if (!email || !password) {
+    els.loginNote.textContent = "Enter your email and password.";
+    els.loginNote.classList.add("warning");
+    return;
+  }
   const { error } = await supabaseClient.auth.signInWithPassword({
     email,
     password,
@@ -1123,9 +1336,44 @@ async function sendLoginLink(event) {
   els.loginNote.classList.remove("warning");
 }
 
+async function signUp(event) {
+  event.preventDefault();
+  if (!supabaseClient) await initSupabase();
+  if (!supabaseClient) {
+    els.loginNote.textContent = "Supabase connection is not ready. Refresh the page once and try again.";
+    els.loginNote.classList.add("warning");
+    return;
+  }
+  const email = els.loginEmail.value.trim().toLowerCase();
+  const password = els.loginPassword.value;
+  if (!email || password.length < 6) {
+    els.loginNote.textContent = "Use an email and a password with at least 6 characters.";
+    els.loginNote.classList.add("warning");
+    return;
+  }
+  const { data, error } = await supabaseClient.auth.signUp({ email, password });
+  if (error) {
+    const message = error.message || "";
+    els.loginNote.textContent = /rate limit|too many/i.test(message)
+      ? "Sign-up is temporarily rate limited by Supabase email. Wait about an hour, disable email confirmation in Supabase Auth, or ask an admin to create the user."
+      : `Sign-up error: ${message}`;
+    els.loginNote.classList.add("warning");
+    return;
+  }
+  els.loginNote.textContent = data.session
+    ? "Account created. Loading your tracker..."
+    : "Account created. If email confirmation is enabled, check your inbox before signing in.";
+  els.loginNote.classList.remove("warning");
+}
+
 async function signOut() {
   if (supabaseClient) await supabaseClient.auth.signOut();
   currentUser = null;
+  activeDataUserId = "";
+  activeDataUserEmail = "";
+  adminUsers = [];
+  applications = [];
+  renderAll();
   setAuthView(false);
 }
 
@@ -1541,6 +1789,7 @@ els.agentSubmitBtn.addEventListener("click", analyseJobMatch);
     showAgentStatus("Role details changed. Analyse again to refresh the recommendation.", "warning");
   });
 });
+els.signUpBtn.addEventListener("click", signUp);
 document.querySelector("#signOutBtn").addEventListener("click", signOut);
 document.querySelector("#closeFormBtn").addEventListener("click", closeDrawer);
 els.drawerBackdrop.addEventListener("click", closeDrawer);
@@ -1556,14 +1805,6 @@ els.detailsClFile.addEventListener("click", (event) => {
   const button = event.target.closest("[data-download-cl]");
   if (button) downloadClFile(button.dataset.downloadCl);
 });
-if (els.staleList) {
-  els.staleList.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-edit]");
-    if (!button) return;
-    const app = applications.find((item) => item.id === button.dataset.edit);
-    if (app) openDrawer(app);
-  });
-}
 document.querySelector("#openSyncBtn").addEventListener("click", openSyncModal);
 document.querySelector("#closeSyncBtn").addEventListener("click", closeSyncModal);
 document.querySelector("#clearSyncBtn").addEventListener("click", clearSyncSettings);
@@ -1571,16 +1812,24 @@ els.syncBackdrop.addEventListener("click", closeSyncModal);
 els.syncForm.addEventListener("submit", saveSyncSettings);
 document.querySelector("#exportBtn").addEventListener("click", exportData);
 els.resetFiltersBtn.addEventListener("click", resetFilters);
+els.adminRefreshBtn?.addEventListener("click", loadAdminUsers);
+els.adminUserSelect?.addEventListener("change", (event) => {
+  viewAdminUser(event.target.value);
+});
+els.adminUserList?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-user-id]");
+  if (button) viewAdminUser(button.dataset.userId);
+});
+els.adminCreateUserForm?.addEventListener("submit", createAdminUser);
 document.querySelector("#importInput").addEventListener("change", (event) => {
   const [file] = event.target.files;
   if (file) importData(file);
 });
 
+window.addEventListener("hashchange", restoreNavFromHash);
 document.querySelectorAll(".nav-item").forEach((item) => {
-  item.addEventListener("click", (event) => {
-    event.preventDefault();
-    handleNav(item.dataset.nav);
-    history.replaceState(null, "", item.getAttribute("href"));
+  item.addEventListener("click", () => {
+    els.navDropdown.open = false;
   });
 });
 
