@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { APICallError, NoOutputGeneratedError } from "ai";
+import { APICallError, NoOutputGeneratedError, RetryError } from "ai";
 import { z } from "zod";
 
 import { createJobMatchAgent } from "@/lib/agent/job-match-agent";
@@ -16,6 +16,10 @@ const requestSchema = z.object({
 });
 
 function getPublicMatchError(error: unknown) {
+  if (RetryError.isInstance(error)) {
+    return getPublicMatchError(error.lastError);
+  }
+
   if (APICallError.isInstance(error)) {
     if (error.statusCode === 401) {
       return { status: 503, message: "The saved OpenAI API key is invalid or no longer active." };
