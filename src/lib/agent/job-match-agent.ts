@@ -34,8 +34,8 @@ export type JobMatchReport = z.infer<typeof jobMatchReportSchema>;
 
 export function createJobMatchAgent(candidateProfile: string) {
   return new ToolLoopAgent({
-  model: openai(process.env.OPENAI_MODEL || "gpt-5.6-luna"),
-  instructions: `You are JobTrack's evidence-grounded job matching agent.
+    model: openai(process.env.OPENAI_MODEL || "gpt-5.6-luna"),
+    instructions: `You are JobTrack's evidence-grounded job matching agent.
 
 Your job is to compare one job description against the authenticated user's latest saved CV profile.
 
@@ -49,52 +49,52 @@ Rules:
 - A missing preferred skill is usually low or medium severity; a missing mandatory qualification is high.
 - Give practical next actions that can be completed before applying or discussed honestly in interview.
 - Keep every field concise and useful to a job applicant.`,
-  tools: {
-    retrieveCandidateEvidence: tool({
-      description:
-        "Retrieve verified CV and portfolio evidence relevant to the job's most important technologies, responsibilities and eligibility requirements.",
-      inputSchema: z.object({
-        queries: z
-          .array(z.string().min(1))
-          .min(3)
-          .max(12)
-          .describe("Important requirements or keywords extracted from the job description"),
+    tools: {
+      retrieveCandidateEvidence: tool({
+        description:
+          "Retrieve verified CV and portfolio evidence relevant to the job's most important technologies, responsibilities and eligibility requirements.",
+        inputSchema: z.object({
+          queries: z
+            .array(z.string().min(1))
+            .min(3)
+            .max(12)
+            .describe("Important requirements or keywords extracted from the job description"),
+        }),
+        execute: async ({ queries }) => ({
+          matches: retrieveEvidence(candidateProfile, queries),
+          note: "These excerpts come from the user's latest saved and editable candidate CV profile.",
+        }),
       }),
-      execute: async ({ queries }) => ({
-        matches: retrieveEvidence(candidateProfile, queries),
-        note: "These excerpts come from the user's latest saved and editable candidate CV profile.",
+      assessRequirementGaps: tool({
+        description:
+          "Classify the job's key requirements as matched, partial or missing using only the verified candidate profile.",
+        inputSchema: z.object({
+          requirements: z
+            .array(z.string().min(1))
+            .min(3)
+            .max(15)
+            .describe("Distinct must-have and high-value preferred requirements from the job description"),
+        }),
+        execute: async ({ requirements }) => ({
+          assessment: assessRequirements(candidateProfile, requirements),
+          note: "Partial means transferable evidence exists but the exact requirement is not verified.",
+        }),
       }),
-    }),
-    assessRequirementGaps: tool({
-      description:
-        "Classify the job's key requirements as matched, partial or missing using only the verified candidate profile.",
-      inputSchema: z.object({
-        requirements: z
-          .array(z.string().min(1))
-          .min(3)
-          .max(15)
-          .describe("Distinct must-have and high-value preferred requirements from the job description"),
-      }),
-      execute: async ({ requirements }) => ({
-        assessment: assessRequirements(candidateProfile, requirements),
-        note: "Partial means transferable evidence exists but the exact requirement is not verified.",
-      }),
-    }),
-  },
-  output: Output.object({ schema: jobMatchReportSchema }),
-  stopWhen: isStepCount(4),
-  prepareStep: async ({ stepNumber }) => {
-    if (stepNumber === 0) {
-      return {
-        toolChoice: { type: "tool" as const, toolName: "retrieveCandidateEvidence" },
-      };
-    }
-    if (stepNumber === 1) {
-      return {
-        toolChoice: { type: "tool" as const, toolName: "assessRequirementGaps" },
-      };
-    }
-    return {};
-  },
+    },
+    output: Output.object({ schema: jobMatchReportSchema }),
+    stopWhen: isStepCount(4),
+    prepareStep: async ({ stepNumber }) => {
+      if (stepNumber === 0) {
+        return {
+          toolChoice: { type: "tool" as const, toolName: "retrieveCandidateEvidence" },
+        };
+      }
+      if (stepNumber === 1) {
+        return {
+          toolChoice: { type: "tool" as const, toolName: "assessRequirementGaps" },
+        };
+      }
+      return { toolChoice: "none" as const };
+    },
   });
 }

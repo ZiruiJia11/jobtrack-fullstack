@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { APICallError, NoOutputGeneratedError } from "ai";
 import { z } from "zod";
 
 import { createJobMatchAgent } from "@/lib/agent/job-match-agent";
@@ -13,6 +14,39 @@ const requestSchema = z.object({
   role: z.string().trim().max(160).default("Unknown role"),
   jobDescription: z.string().trim().min(80).max(20_000),
 });
+
+function getPublicMatchError(error: unknown) {
+  if (APICallError.isInstance(error)) {
+    if (error.statusCode === 401) {
+      return { status: 503, message: "The saved OpenAI API key is invalid or no longer active." };
+    }
+    if (error.statusCode === 403 || error.statusCode === 404) {
+      return { status: 503, message: "This OpenAI project cannot access the configured AI model." };
+    }
+    if (error.statusCode === 429) {
+      const response = error.responseBody?.toLowerCase() || "";
+      const isQuotaError = response.includes("quota") || response.includes("billing");
+      return {
+        status: 429,
+        message: isQuotaError
+          ? "The OpenAI API account has no available credit or has reached its spending limit."
+          : "OpenAI is rate-limiting requests. Wait a moment and try again.",
+      };
+    }
+    if (error.statusCode && error.statusCode >= 500) {
+      return { status: 502, message: "OpenAI is temporarily unavailable. Please try again shortly." };
+    }
+  }
+
+  if (NoOutputGeneratedError.isInstance(error)) {
+    return { status: 502, message: "The AI response was incomplete. Please run the analysis again." };
+  }
+
+  return {
+    status: 502,
+    message: "The AI match agent could not complete this analysis. Check the server log for details.",
+  };
+}
 
 export async function POST(request: Request) {
   const { user, error: authError } = await getUserFromRequest(request);
@@ -69,9 +103,7 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("Job match agent failed", error);
-    return NextResponse.json(
-      { error: "The AI match agent could not complete this analysis. Please try again." },
-      { status: 502 },
-    );
+    const publicError = getPublicMatchError(error);
+    return NextResponse.json({ error: publicError.message }, { status: publicError.status });
   }
 }
