@@ -34,6 +34,13 @@ export function getSupabaseAuth() {
   return authClient;
 }
 
+export function getSupabaseForRequest(request: Request) {
+  return createClient(requiredEnv("NEXT_PUBLIC_SUPABASE_URL"), requiredEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"), {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: request.headers.get("authorization") || "" } },
+  });
+}
+
 export function adminEmails() {
   const configured = process.env.JOBTRACK_ADMIN_EMAILS || process.env.JOBTRACK_LOGIN_EMAIL || "steven5115115@gmail.com";
   return configured

@@ -34,6 +34,8 @@ export type JobMatchReport = z.infer<typeof jobMatchReportSchema>;
 
 export function createJobMatchAgent(candidateProfile: string) {
   return new ToolLoopAgent({
+    maxRetries: 0,
+    maxOutputTokens: 3_000,
     model: openai(process.env.OPENAI_MODEL || "gpt-5.6-luna"),
     instructions: `You are JobTrack's evidence-grounded job matching agent.
 

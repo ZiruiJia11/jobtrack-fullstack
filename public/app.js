@@ -82,6 +82,10 @@ const els = {
   loginPassword: document.querySelector("#loginPassword"),
   loginNote: document.querySelector("#loginNote"),
   signUpBtn: document.querySelector("#signUpBtn"),
+  demoLoginBtn: document.querySelector("#demoLoginBtn"),
+  demoBanner: document.querySelector("#demoBanner"),
+  agentUsage: document.querySelector("#agentUsage"),
+  sampleMatchBtn: document.querySelector("#sampleMatchBtn"),
   navDropdown: document.querySelector("#navDropdown"),
   navMenuLabel: document.querySelector("#navMenuLabel"),
   pageEyebrow: document.querySelector("#pageEyebrow"),
@@ -644,6 +648,7 @@ function openDrawer(app = null) {
     isBrowserImporterReady() ? "success" : "info",
   );
   resetAgentAnalysis();
+  refreshAiUsage();
 
   els.drawer.classList.remove("hidden");
   els.drawerBackdrop.classList.remove("hidden");
@@ -956,6 +961,51 @@ function setAuthView(isSignedIn) {
     : currentUser?.email || "Not signed in";
   els.adminNav?.classList.toggle("hidden", !isCurrentAdmin());
   els.adminPanel?.classList.toggle("hidden", !isCurrentAdmin());
+  const demo = isSignedIn && currentUser?.email?.toLowerCase() === RUNTIME_CONFIG.demoEmail;
+  els.demoBanner.classList.toggle("hidden", !demo);
+  els.sampleMatchBtn.classList.toggle("hidden", !demo);
+}
+
+async function demoLogin() {
+  els.demoLoginBtn.disabled = true;
+  els.demoLoginBtn.textContent = "Signing in...";
+  try {
+    if (!supabaseClient) await initSupabase();
+    if (!supabaseClient) throw new Error("Connection is not ready. Please refresh and try again.");
+    const { error } = await supabaseClient.auth.signInWithPassword({
+      email: RUNTIME_CONFIG.demoEmail,
+      password: RUNTIME_CONFIG.demoPassword,
+    });
+    if (error) throw error;
+  } catch (error) {
+    els.loginNote.textContent = `Demo login: ${error.message}`;
+    els.loginNote.classList.add("warning");
+  } finally {
+    els.demoLoginBtn.disabled = false;
+    els.demoLoginBtn.textContent = "Try the demo";
+  }
+}
+
+async function refreshAiUsage() {
+  try {
+    const { usage } = await apiRequest("/api/job-match");
+    els.agentUsage.textContent = `Live AI: ${Math.max(0, usage.limit - usage.used)} of ${usage.limit} analyses left today. Resets at midnight New Zealand time. Provider attempts count even if they fail; sample analysis is free.`;
+  } catch {
+    els.agentUsage.textContent = "Live AI: 2 analyses per account per day. Usage is checked before every request.";
+  }
+}
+
+async function openDemoSample() {
+  try {
+    const response = await fetch("/demo-fixture.json");
+    if (!response.ok) throw new Error("Sample data could not be loaded.");
+    const fixture = await response.json();
+    const app = applications.find((item) => item.id === fixture.jobs[0].id);
+    openDrawer({ ...(app || {}), ...fixture.jobs[0] });
+    await analyseJobMatch("sample");
+  } catch (error) {
+    updateSyncStatus(error.message);
+  }
 }
 
 function renderAdminUsers() {
@@ -1734,7 +1784,7 @@ function renderAgentReport(payload) {
   els.agentResult.classList.remove("hidden");
 }
 
-async function analyseJobMatch() {
+async function analyseJobMatch(mode = "live") {
   const company = document.querySelector("#company").value.trim();
   const role = document.querySelector("#role").value.trim();
   const jobDescription = document.querySelector("#jobDescription").value.trim();
@@ -1750,7 +1800,8 @@ async function analyseJobMatch() {
   els.agentSubmitBtn.disabled = true;
   els.agentSubmitBtn.textContent = "Agent working…";
   els.agentResult.classList.add("hidden");
-  showAgentStatus("Retrieving CV evidence, assessing requirements, and preparing a structured recommendation…");
+  els.sampleMatchBtn.disabled = true;
+  showAgentStatus(mode === "sample" ? "Loading the labelled showcase example..." : "Retrieving CV evidence, assessing requirements, and preparing a structured recommendation…");
 
   try {
     const payload = await apiRequest("/api/job-match", {
@@ -1759,16 +1810,20 @@ async function analyseJobMatch() {
         company,
         role,
         jobDescription,
+        mode,
       }),
     });
     renderAgentReport(payload);
-    hideAgentStatus();
-    els.agentResult.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    if (payload.sample) showAgentStatus("Sample report for the original fictional CV and job. No AI API was called, and no daily allowance was used.", "info");
+    else hideAgentStatus();
+    els.drawer.scrollTo({ top: els.agentStatus.offsetTop - 80, behavior: "smooth" });
   } catch (error) {
     showAgentStatus(error.message || "The match analysis failed. Please try again.", "error");
   } finally {
     els.agentSubmitBtn.disabled = false;
+    els.sampleMatchBtn.disabled = false;
     els.agentSubmitBtn.textContent = "Analyse match";
+    await refreshAiUsage();
   }
 }
 
@@ -1781,7 +1836,12 @@ document.querySelector("#cancelCandidateProfileBtn").addEventListener("click", c
 els.candidateProfileBackdrop.addEventListener("click", closeCandidateProfile);
 els.uploadCandidateCvBtn.addEventListener("click", uploadCandidateCv);
 els.candidateProfileForm.addEventListener("submit", saveCandidateProfile);
-els.agentSubmitBtn.addEventListener("click", analyseJobMatch);
+els.agentSubmitBtn.addEventListener("click", () => analyseJobMatch());
+els.sampleMatchBtn.addEventListener("click", () => analyseJobMatch("sample"));
+els.demoLoginBtn.addEventListener("click", demoLogin);
+document.querySelector("#openDemoSampleBtn").addEventListener("click", openDemoSample);
+document.querySelector("#demoEmail").textContent = RUNTIME_CONFIG.demoEmail;
+document.querySelector("#demoPassword").textContent = RUNTIME_CONFIG.demoPassword;
 ["company", "role", "jobDescription"].forEach((field) => {
   document.querySelector(`#${field}`).addEventListener("input", () => {
     if (els.agentResult.classList.contains("hidden")) return;

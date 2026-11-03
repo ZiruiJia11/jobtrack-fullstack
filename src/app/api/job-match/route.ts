@@ -5,6 +5,8 @@ import { z } from "zod";
 import { createJobMatchAgent } from "@/lib/agent/job-match-agent";
 import { readCandidateProfile } from "@/lib/candidate-profile-store";
 import { getUserFromRequest } from "@/lib/supabase-server";
+import { consumeAiAttempt, readAiUsage } from "@/lib/ai-usage";
+import { isDemoUser, sampleMatch } from "@/lib/demo";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -13,6 +15,7 @@ const requestSchema = z.object({
   company: z.string().trim().max(120).default("Unknown company"),
   role: z.string().trim().max(160).default("Unknown role"),
   jobDescription: z.string().trim().min(80).max(20_000),
+  mode: z.enum(["live", "sample"]).default("live"),
 });
 
 function getPublicMatchError(error: unknown) {
@@ -52,17 +55,20 @@ function getPublicMatchError(error: unknown) {
   };
 }
 
+export async function GET(request: Request) {
+  const { user } = await getUserFromRequest(request);
+  if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  try {
+    return NextResponse.json({ usage: await readAiUsage(user.id) }, { headers: { "Cache-Control": "no-store" } });
+  } catch {
+    return NextResponse.json({ error: "AI usage tracking is unavailable." }, { status: 503 });
+  }
+}
+
 export async function POST(request: Request) {
   const { user, error: authError } = await getUserFromRequest(request);
   if (!user) {
     return NextResponse.json({ error: authError || "Not authenticated" }, { status: 401 });
-  }
-
-  if (!process.env.OPENAI_API_KEY) {
-    return NextResponse.json(
-      { error: "AI matching is not configured. Add OPENAI_API_KEY to the server environment." },
-      { status: 503 },
-    );
   }
 
   const parsed = requestSchema.safeParse(await request.json().catch(() => null));
@@ -73,7 +79,17 @@ export async function POST(request: Request) {
     );
   }
 
-  const { company, role, jobDescription } = parsed.data;
+  const { company, role, jobDescription, mode } = parsed.data;
+  if (mode === "sample") {
+    if (!isDemoUser(user.email)) return NextResponse.json({ error: "Sample analysis is available in the demo account." }, { status: 403 });
+    const sample = sampleMatch(company, role, jobDescription);
+    if (!sample) return NextResponse.json({ error: "Open the original Orbit Works demo application to view its sample analysis." }, { status: 400 });
+    return NextResponse.json(sample);
+  }
+
+  if (!process.env.OPENAI_API_KEY) {
+    return NextResponse.json({ error: "Live AI matching is not configured." }, { status: 503 });
+  }
 
   try {
     const candidateProfile = await readCandidateProfile(user.id);
@@ -83,9 +99,19 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
+    const usage = await consumeAiAttempt(user.id);
+    if (!usage.allowed) {
+      return NextResponse.json({
+        error: usage.reason === "site_limit"
+          ? "Today's shared AI budget has been reached. Try again after midnight New Zealand time."
+          : "You have used your 2 live analyses for today. Try again after midnight New Zealand time.",
+        usage,
+      }, { status: 429, headers: { "Retry-After": String(Math.max(1, Math.ceil((Date.parse(usage.resets_at) - Date.now()) / 1000))) } });
+    }
     const jobMatchAgent = createJobMatchAgent(candidateProfile.text);
     const result = await jobMatchAgent.generate({
       prompt: `Company: ${company || "Unknown company"}\nRole: ${role || "Unknown role"}\n\nJob description:\n${jobDescription}`,
+      abortSignal: AbortSignal.timeout(45_000),
     });
 
     const trace = result.steps.flatMap((step, stepIndex) =>
@@ -98,6 +124,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       report: result.output,
+      usage: { used: usage.used, limit: usage.daily_limit },
       trace,
       model: process.env.OPENAI_MODEL || "gpt-5.6-luna",
       candidateProfile: {

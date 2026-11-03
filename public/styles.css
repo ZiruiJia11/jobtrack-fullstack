@@ -916,7 +916,7 @@ tr:hover td {
   inset: 0;
   background: rgba(9, 24, 45, 0.36);
   backdrop-filter: blur(5px);
-  z-index: 10;
+  z-index: 40;
 }
 
 .drawer {
@@ -925,7 +925,7 @@ tr:hover td {
   left: 50%;
   right: auto;
   transform: translate(-50%, -50%);
-  z-index: 11;
+  z-index: 41;
   width: min(880px, calc(100vw - 32px));
   height: auto;
   max-height: calc(100vh - 36px);
@@ -933,6 +933,7 @@ tr:hover td {
   box-shadow: var(--shadow);
   padding: 22px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid rgba(255, 255, 255, 0.7);
   border-radius: 10px;
 }
@@ -942,7 +943,7 @@ tr:hover td {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  z-index: 12;
+  z-index: 42;
   width: min(760px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
   overflow-y: auto;
@@ -953,6 +954,11 @@ tr:hover td {
 }
 
 .drawer-head {
+  position: sticky;
+  top: -22px;
+  z-index: 2;
+  background: #fff;
+  padding: 6px 0 10px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1649,6 +1655,8 @@ button:disabled {
     padding: 18px;
   }
 
+  .drawer-head { top: -18px; }
+
   .application-modal form {
     grid-template-columns: 1fr;
   }
@@ -1657,3 +1665,34 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+.demo-login {
+  margin-top: 24px;
+  padding-top: 22px;
+  border-top: 1px solid #d6e1f1;
+}
+
+.demo-login-title, .demo-banner, .agent-action-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.demo-tag {
+  color: #087568;
+  background: #e8f8f2;
+  border: 1px solid #b9e9d8;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.demo-credentials { margin-top: 14px; font-size: 13px; }
+.demo-credentials summary { cursor: pointer; color: #42618e; }
+.demo-credentials dl { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px; }
+.demo-credentials dd { margin: 0; overflow-wrap: anywhere; }
+.demo-banner { background: #effaf6; border: 1px solid #b9e9d8; border-radius: 6px; padding: 14px 18px; margin-bottom: 18px; }
+.demo-banner p { margin: 5px 0 0; font-size: 13px; color: #3c635b; }
+.agent-action-buttons { justify-content: flex-end; }
+#agentUsage { margin-bottom: 12px; }

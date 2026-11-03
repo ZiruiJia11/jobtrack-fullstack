@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSupabaseAdmin, getUserFromRequest } from "@/lib/supabase-server";
+import { getSupabaseAdmin, getSupabaseForRequest, getUserFromRequest } from "@/lib/supabase-server";
 
 const TABLE_NAME = "applications";
 
@@ -77,8 +77,10 @@ export async function POST(request: Request) {
   }
 
   const rows = applications.map((app: ApplicationPayload) => rowFromApplication(app, requestedUserId));
-  const { error } = await getSupabaseAdmin().from(TABLE_NAME).upsert(rows, { onConflict: "id" });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // RLS checks the existing row as well as the proposed owner during an upsert.
+  const writer = isAdmin ? getSupabaseAdmin() : getSupabaseForRequest(request);
+  const { error } = await writer.from(TABLE_NAME).upsert(rows, { onConflict: "id" });
+  if (error) return NextResponse.json({ error: error.message }, { status: error.code === "42501" ? 403 : 500 });
 
   return NextResponse.json({ saved: rows.length });
 }

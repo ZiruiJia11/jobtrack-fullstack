@@ -1,4 +1,5 @@
 import Script from "next/script";
+import { DEMO_EMAIL, DEMO_PASSWORD } from "@/lib/demo";
 
 const pageMarkup = String.raw`
   <section class="login-screen" id="loginScreen">
@@ -18,6 +19,12 @@ const pageMarkup = String.raw`
         </div>
       </form>
       <div class="file-note" id="loginNote">New users can create an account. Admin access is controlled by server settings.</div>
+      <section class="demo-login" aria-label="Showcase account">
+        <div class="demo-login-title"><strong>Explore the showcase</strong><span class="demo-tag">Demo</span></div>
+        <p>A shared workspace with fictional jobs and a sample CV.</p>
+        <button class="secondary full" id="demoLoginBtn" type="button">Try the demo</button>
+        <details class="demo-credentials"><summary>Demo login details</summary><dl><dt>Email</dt><dd id="demoEmail"></dd><dt>Password</dt><dd id="demoPassword"></dd></dl></details>
+      </section>
     </div>
   </section>
 
@@ -68,6 +75,10 @@ const pageMarkup = String.raw`
         </div>
       </header>
 
+      <section class="demo-banner hidden" id="demoBanner" aria-label="Demo workspace">
+        <div><strong>Demo workspace</strong><p>Fictional data in a shared account. Please use sample information only.</p></div>
+        <button class="secondary" id="openDemoSampleBtn" type="button">View sample match</button>
+      </section>
       <section class="page-view" data-page="applications" id="applicationsPage">
         <section class="action-board" aria-label="Application action summary">
           <div class="action-card action-card-primary">
@@ -228,8 +239,12 @@ const pageMarkup = String.raw`
         </div>
         <div class="agent-form-actions">
           <p class="muted">Analysis does not save or change this record. Review the result, then choose whether to save.</p>
-          <button class="secondary" id="agentSubmitBtn" type="button">Analyse match</button>
+          <div class="agent-action-buttons">
+            <button class="secondary hidden" id="sampleMatchBtn" type="button">View sample analysis</button>
+            <button class="secondary" id="agentSubmitBtn" type="button">Analyse match</button>
+          </div>
         </div>
+        <p class="file-note" id="agentUsage">Live AI: 2 analyses per account per day. Resets at midnight New Zealand time.</p>
         <div class="agent-status hidden" id="agentStatus" role="status" aria-live="polite"></div>
         <div class="agent-result hidden" id="agentResult" aria-live="polite">
           <div class="agent-score-card">
@@ -366,6 +381,8 @@ const defaultAnonKey =
 
 export default function Home() {
   const publicConfig = {
+    demoEmail: DEMO_EMAIL,
+    demoPassword: DEMO_PASSWORD,
     supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL || "https://pexthgxqandoeesqbelb.supabase.co",
     supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || defaultAnonKey,
     adminEmails: (process.env.JOBTRACK_ADMIN_EMAILS || process.env.JOBTRACK_LOGIN_EMAIL || "steven5115115@gmail.com")

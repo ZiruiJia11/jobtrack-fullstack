@@ -1,8 +1,27 @@
 # JobTrack Fullstack
 
-Personal job application tracker with a Next.js frontend/backend and Supabase storage.
+Multi-user job application tracker with a Next.js frontend/backend, Supabase storage and evidence-grounded AI matching.
 
 Live site: https://jobtrack-fullstack-ashy.vercel.app/
+
+## Interview Showcase
+
+Click **Try the demo** on the sign-in page, or use:
+
+- Email: `demo@jobtrack.example`
+- Password: `JobTrackDemo!2026`
+
+This is a shared ordinary account, separate from the owner's data. It contains ten fictional applications, a synthetic candidate CV, a downloadable CV attachment and cover-letter text. Visitors can try search, filters, editing and analytics. Do not upload personal information to the shared account.
+
+Choose **View sample match** to see an explicitly labelled fixed report for the original fictional Orbit Works job and CV. The sample sends no request to an AI provider, uses no allowance, and makes no claim to be a live AI result. Live analysis remains available separately when the provider has credit.
+
+Live AI allows **two analysis attempts per account per day** and **twenty across the site per day**, resetting at midnight in `Pacific/Auckland`. Database row locks reserve allowance before a provider call, so concurrent requests, refreshes and deployments cannot bypass the cap. Requests fail closed if the usage store is unavailable. Provider attempts count even when they fail, because an upstream failure can still incur usage. The agent makes no automatic retries, has a four-step cap, a 3,000-token output cap per step and a 45-second request deadline. These are request controls, not a guaranteed dollar spending ceiling; configure a provider billing limit too.
+
+Apply `sql/ai-usage-limits.sql` to add the usage tables and service-only reservation function. This does not modify existing application records. AI usage is read-only for the owning user; only the server's service role can reserve attempts.
+
+The idempotent `scripts/setup-demo.mjs` creates only the dedicated demo account, inserts missing fixture records and uploads the synthetic CV. Set `JOBTRACK_ADMIN_EMAIL` and `JOBTRACK_ADMIN_PASSWORD` locally before running it with Node. Existing records are never reset by this script. `JOBTRACK_BASE_URL` can target a local test server. Demo credentials are deliberately public and confer no administrator permissions.
+
+Run `node scripts/verify-showcase.mjs` to verify demo sign-in, account isolation, denied admin access, quota visibility, sample labelling and real CV download. It sends **zero paid AI requests**. Set `JOBTRACK_BASE_URL` to test another deployment.
 
 ## What It Does
 
@@ -16,7 +35,7 @@ Live site: https://jobtrack-fullstack-ashy.vercel.app/
 - Sync data through a backend API into Supabase.
 - Analyse a saved or pasted job description with a tool-using AI Match Agent.
 - Ground each match report in reviewed CV evidence and show the agent's tool trace.
-- Restrict login to one email: `steven5115115@gmail.com`.
+- Separate records by authenticated user and provide server-authorized administration.
 
 ## Tech Stack
 
@@ -70,7 +89,7 @@ npm install
 NEXT_PUBLIC_SUPABASE_URL=https://pexthgxqandoeesqbelb.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_public_key
 SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_secret_key
-JOBTRACK_LOGIN_EMAIL=steven5115115@gmail.com
+JOBTRACK_ADMIN_EMAILS=steven5115115@gmail.com
 OPENAI_API_KEY=your_openai_api_key
 OPENAI_MODEL=gpt-5.6-luna
 ```
@@ -132,7 +151,7 @@ Use a Web Service with:
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` is safe to expose in browser code.
 - `SUPABASE_SERVICE_ROLE_KEY` is private and must only live in Vercel/Render environment variables.
 - `OPENAI_API_KEY` is private and must only live in local or deployment environment variables.
-- The backend verifies the Supabase session token and only allows `JOBTRACK_LOGIN_EMAIL`.
+- The backend verifies Supabase session tokens. Ordinary application writes run under the caller's RLS permissions; administrative access requires an email in `JOBTRACK_ADMIN_EMAILS`.
 - The AI endpoint uses the same authenticated-session check and never sends the API key to the browser.
 - The URL importer rejects private-network targets and validates redirects to reduce SSRF risk.
 - The optional browser helper accepts only HTTPS SEEK/LinkedIn URLs and messages from approved JobTrack hostnames.
