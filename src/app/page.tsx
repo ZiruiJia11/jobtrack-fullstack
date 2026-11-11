@@ -48,11 +48,9 @@ const pageMarkup = String.raw`
           <div class="quick-stats" id="quickStats"></div>
           <div class="sync-card">
             <div class="sync-title">Cloud sync</div>
-            <div id="syncStatus">Backend not connected</div>
-            <button class="secondary full" id="openSyncBtn" type="button">Connection info</button>
+            <div id="syncStatus">Not connected</div>
           </div>
           <button class="secondary full" id="openCandidateProfileBtn" type="button">Candidate CV profile</button>
-          <button class="secondary full" id="exportBtn" type="button">Export data</button>
         </div>
       </details>
     </aside>
@@ -65,12 +63,18 @@ const pageMarkup = String.raw`
           <p id="pageDescription">Review, filter, and update every role you are tracking.</p>
         </div>
         <div class="topbar-actions">
-          <span class="user-chip" id="userChip">Not signed in</span>
-          <label class="import-btn">
-            Import
-            <input id="importInput" type="file" accept="application/json" hidden />
-          </label>
-          <button class="secondary" id="signOutBtn" type="button">Sign out</button>
+          <details class="account-menu" id="accountMenu">
+            <summary aria-label="Account menu"><span class="user-chip" id="userChip">Not signed in</span><span class="nav-chevron" aria-hidden="true"></span></summary>
+            <div class="account-menu-panel" role="menu">
+              <label class="menu-item" role="menuitem">
+                Import from JSON
+                <input id="importInput" type="file" accept="application/json" hidden />
+              </label>
+              <button class="menu-item" id="exportBtn" type="button" role="menuitem">Export data</button>
+              <button class="menu-item hidden" id="openSyncBtn" type="button" role="menuitem">Connection info</button>
+              <button class="menu-item menu-item-danger" id="signOutBtn" type="button" role="menuitem">Sign out</button>
+            </div>
+          </details>
           <button class="primary" id="openFormBtn" type="button">+ Add application</button>
         </div>
       </header>
@@ -202,107 +206,119 @@ const pageMarkup = String.raw`
     </div>
     <form id="applicationForm">
       <input id="recordId" type="hidden" />
-      <label>Company *<input id="company" required placeholder="e.g. Google" /></label>
-      <label>Role *<input id="role" required placeholder="e.g. Software Engineer" /></label>
-      <div class="url-import-block">
+      <div class="url-import-block form-full">
         <label>
           Job link
           <div class="url-import-row">
-            <input id="link" type="url" placeholder="https://company.com/jobs/role" />
+            <input id="link" type="url" placeholder="Paste a job URL to fill in the details" />
             <button class="secondary" id="importJobUrlBtn" type="button">Import details</button>
           </div>
         </label>
         <div class="file-note" id="urlImportNote">Paste a public job URL to fill company, role, JD, and category.</div>
       </div>
-      <div class="two-col">
-        <label>Source<select id="source"></select></label>
-        <label>Category<select id="category"></select></label>
-      </div>
-      <div class="two-col">
-        <label>Job type<select id="jobType"></select></label>
+      <label>Company *<input id="company" required placeholder="e.g. Xero" /></label>
+      <label>Role *<input id="role" required placeholder="e.g. Software Engineer" /></label>
+      <div class="form-row-3 form-full">
         <label>Status<select id="status"></select></label>
-      </div>
-      <div class="two-col">
-        <label>Applied date *<input id="appliedDate" type="date" required /></label>
+        <label>Applied date<input id="appliedDate" type="date" /></label>
         <label>Follow-up date<input id="followUpDate" type="date" /></label>
       </div>
-      <details class="form-more" id="stageDates">
-        <summary>Stage dates <span class="muted">Filled in automatically when the status changes</span></summary>
-        <div class="two-col">
-          <label>Screen date<input id="screenDate" type="date" /></label>
-          <label>Interview date<input id="interviewDate" type="date" /></label>
-        </div>
-        <div class="two-col">
-          <label>Final date<input id="finalDate" type="date" /></label>
-          <label>Decision date<input id="decisionDate" type="date" /></label>
-        </div>
-      </details>
-      <label>Job description<textarea id="jobDescription" rows="6" placeholder="Paste the JD here so you can review it later..."></textarea></label>
-      <section class="agent-panel application-agent" aria-labelledby="agentTitle">
-        <div class="agent-panel-head">
-          <div>
-            <span class="eyebrow">Analyse before recording</span>
-            <h2 id="agentTitle">AI match check</h2>
-            <p>Compare the company, role, and JD above with your verified CV evidence before saving this application.</p>
-          </div>
-          <span class="agent-badge">OpenAI + AI SDK</span>
-        </div>
-        <div class="agent-form-actions">
-          <p class="muted">Analysis does not save or change this record. Review the result, then choose whether to save.</p>
-          <div class="agent-action-buttons">
-            <button class="secondary hidden" id="sampleMatchBtn" type="button">View sample analysis</button>
-            <button class="secondary" id="agentSubmitBtn" type="button">Analyse match</button>
-          </div>
-        </div>
-        <p class="file-note" id="agentUsage">Live AI: 2 analyses per account per day. Resets at midnight New Zealand time.</p>
-        <div class="agent-status hidden" id="agentStatus" role="status" aria-live="polite"></div>
-        <div class="agent-result hidden" id="agentResult" aria-live="polite">
-          <div class="agent-score-card">
-            <div>
-              <span class="action-label">Evidence-based fit</span>
-              <strong id="agentScore">—</strong>
+      <details class="form-section form-full" id="sectionDetails">
+        <summary><span class="form-section-title">Details</span><span class="form-section-hint" id="sectionDetailsHint"></span></summary>
+        <div class="form-section-body">
+          <label>Source<select id="source"></select></label>
+          <label>Category<select id="category"></select></label>
+          <label>Job type<select id="jobType"></select></label>
+          <details class="form-more form-full" id="stageDates">
+            <summary>Stage dates <span class="muted">Filled in automatically when the status changes</span></summary>
+            <div class="form-section-body">
+              <label>Screen date<input id="screenDate" type="date" /></label>
+              <label>Interview date<input id="interviewDate" type="date" /></label>
+              <label>Final date<input id="finalDate" type="date" /></label>
+              <label>Decision date<input id="decisionDate" type="date" /></label>
             </div>
-            <span class="agent-recommendation" id="agentRecommendation"></span>
-          </div>
-          <div class="agent-summary" id="agentSummary"></div>
-          <div class="agent-result-grid">
-            <section>
-              <h3>Verified strengths</h3>
-              <ul class="agent-list" id="agentStrengths"></ul>
-            </section>
-            <section>
-              <h3>Gaps and mitigations</h3>
-              <ul class="agent-list" id="agentGaps"></ul>
-            </section>
-            <section>
-              <h3>Likely interview questions</h3>
-              <ul class="agent-list" id="agentQuestions"></ul>
-            </section>
-            <section>
-              <h3>Next actions</h3>
-              <ul class="agent-list" id="agentActions"></ul>
-            </section>
-          </div>
-          <section class="agent-angle">
-            <h3>Cover-letter angle</h3>
-            <p id="agentCoverLetter"></p>
-          </section>
-          <details class="agent-trace">
-            <summary>Agent tool trace</summary>
-            <ol id="agentTrace"></ol>
-            <p class="muted" id="agentModel"></p>
           </details>
         </div>
-      </section>
-      <label>CV file<input id="cvFile" type="file" accept=".pdf,.doc,.docx,.txt" /></label>
-      <div class="file-note" id="cvFileNote">No CV saved for this application.</div>
-      <label>Cover letter text<textarea id="coverLetter" rows="6" placeholder="Paste or draft your CL text here..."></textarea></label>
-      <label>Cover letter file<input id="clFile" type="file" accept=".pdf,.doc,.docx,.txt" /></label>
-      <div class="file-note" id="clFileNote">No cover letter file saved for this application.</div>
-      <label>Notes<textarea id="notes" rows="4" placeholder="Contact, salary range, next action..."></textarea></label>
-      <div class="drawer-actions">
-        <button class="secondary" id="deleteBtn" type="button">Delete</button>
-        <button class="primary" type="submit">Save</button>
+      </details>
+      <details class="form-section form-full" id="sectionJob">
+        <summary><span class="form-section-title">Job description &amp; AI match</span><span class="form-section-hint" id="sectionJobHint"></span></summary>
+        <div class="form-section-body">
+          <label class="form-full">Job description<textarea id="jobDescription" rows="6" placeholder="Paste the JD here so you can review it later..."></textarea></label>
+          <section class="agent-panel application-agent" aria-labelledby="agentTitle">
+            <div class="agent-panel-head">
+              <div>
+                <span class="eyebrow">Analyse before recording</span>
+                <h2 id="agentTitle">AI match check</h2>
+                <p>Compare the company, role, and JD above with your verified CV evidence before saving this application.</p>
+              </div>
+              <span class="agent-badge">OpenAI + AI SDK</span>
+            </div>
+            <div class="agent-form-actions">
+              <p class="muted">Analysis does not save or change this record. Review the result, then choose whether to save.</p>
+              <div class="agent-action-buttons">
+                <button class="secondary hidden" id="sampleMatchBtn" type="button">View sample analysis</button>
+                <button class="secondary" id="agentSubmitBtn" type="button">Analyse match</button>
+              </div>
+            </div>
+            <p class="file-note" id="agentUsage">Live AI: 2 analyses per account per day. Resets at midnight New Zealand time.</p>
+            <div class="agent-status hidden" id="agentStatus" role="status" aria-live="polite"></div>
+            <div class="agent-result hidden" id="agentResult" aria-live="polite">
+              <div class="agent-score-card">
+                <div>
+                  <span class="action-label">Evidence-based fit</span>
+                  <strong id="agentScore">—</strong>
+                </div>
+                <span class="agent-recommendation" id="agentRecommendation"></span>
+              </div>
+              <div class="agent-summary" id="agentSummary"></div>
+              <div class="agent-result-grid">
+                <section>
+                  <h3>Verified strengths</h3>
+                  <ul class="agent-list" id="agentStrengths"></ul>
+                </section>
+                <section>
+                  <h3>Gaps and mitigations</h3>
+                  <ul class="agent-list" id="agentGaps"></ul>
+                </section>
+                <section>
+                  <h3>Likely interview questions</h3>
+                  <ul class="agent-list" id="agentQuestions"></ul>
+                </section>
+                <section>
+                  <h3>Next actions</h3>
+                  <ul class="agent-list" id="agentActions"></ul>
+                </section>
+              </div>
+              <section class="agent-angle">
+                <h3>Cover-letter angle</h3>
+                <p id="agentCoverLetter"></p>
+              </section>
+              <details class="agent-trace">
+                <summary>Agent tool trace</summary>
+                <ol id="agentTrace"></ol>
+                <p class="muted" id="agentModel"></p>
+              </details>
+            </div>
+          </section>
+        </div>
+      </details>
+      <details class="form-section form-full" id="sectionDocs">
+        <summary><span class="form-section-title">Documents &amp; notes</span><span class="form-section-hint" id="sectionDocsHint"></span></summary>
+        <div class="form-section-body">
+          <label class="form-full">CV file<input id="cvFile" type="file" accept=".pdf,.doc,.docx,.txt" /></label>
+          <div class="file-note form-full" id="cvFileNote">No CV saved for this application.</div>
+          <label class="form-full">Cover letter text<textarea id="coverLetter" rows="6" placeholder="Paste or draft your CL text here..."></textarea></label>
+          <label class="form-full">Cover letter file<input id="clFile" type="file" accept=".pdf,.doc,.docx,.txt" /></label>
+          <div class="file-note form-full" id="clFileNote">No cover letter file saved for this application.</div>
+          <label class="form-full">Notes<textarea id="notes" rows="4" placeholder="Contact, salary range, next action..."></textarea></label>
+        </div>
+      </details>
+      <div class="drawer-actions form-full">
+        <button class="text-danger" id="deleteBtn" type="button">Delete</button>
+        <div class="drawer-actions-main">
+          <button class="secondary" id="cancelFormBtn" type="button">Cancel</button>
+          <button class="primary" type="submit">Save</button>
+        </div>
       </div>
     </form>
   </aside>

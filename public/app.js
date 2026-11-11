@@ -1041,8 +1041,12 @@ function openDrawer(app = null) {
     document.querySelector("#category").value = "Other";
     document.querySelector("#jobType").value = "Full-time";
   }
+  ["sectionDetails", "sectionJob", "sectionDocs"].forEach((id) => {
+    document.querySelector(`#${id}`).open = false;
+  });
   updateCvNote(app);
   updateClNote(app);
+  updateFormSectionHints(app);
   setUrlImportNote(
     isBrowserImporterReady()
       ? "Browser helper connected. SEEK and LinkedIn signed-in pages are supported."
@@ -1070,6 +1074,33 @@ function updateClNote(app) {
   els.clFileNote.textContent = name
     ? `Saved CL file: ${name} (${location}). Choose another file to replace it.`
     : "No cover letter file saved for this application.";
+}
+
+// One-line summaries on the collapsed form sections, so the user can see what
+// is inside without opening them.
+function updateFormSectionHints(app = null) {
+  const value = (id) => document.querySelector(`#${id}`).value.trim();
+  const details = [value("source"), value("category"), value("jobType")].filter(Boolean).join(" · ");
+  document.querySelector("#sectionDetailsHint").textContent = details;
+
+  const jd = value("jobDescription");
+  document.querySelector("#sectionJobHint").textContent = jd
+    ? `JD saved · ${jd.split(/\s+/).length} words`
+    : "Paste the JD to run an AI match";
+
+  const cvFile = document.querySelector("#cvFile").files[0];
+  const clFile = document.querySelector("#clFile").files[0];
+  const docs = [
+    (cvFile || app?.cvFileName || app?.cvStoragePath) && "CV",
+    (clFile || value("coverLetter") || app?.clFileName || app?.clStoragePath) && "Cover letter",
+    value("notes") && "Notes",
+  ].filter(Boolean);
+  document.querySelector("#sectionDocsHint").textContent = docs.length ? docs.join(" · ") : "Nothing attached";
+}
+
+function currentDrawerApp() {
+  const id = document.querySelector("#recordId").value;
+  return id ? applications.find((item) => item.id === id) || null : null;
 }
 
 function closeDrawer() {
@@ -1133,7 +1164,10 @@ async function upsertApplication(event) {
     source: document.querySelector("#source").value,
     category: document.querySelector("#category").value,
     jobType: document.querySelector("#jobType").value,
-    appliedDate: document.querySelector("#appliedDate").value,
+    // Applied date is optional in the form; anything past "Saved" has been applied for.
+    appliedDate:
+      document.querySelector("#appliedDate").value ||
+      (document.querySelector("#status").value === "Saved" ? "" : previous?.appliedDate || todayIso()),
     followUpDate: document.querySelector("#followUpDate").value,
     screenDate: document.querySelector("#screenDate").value,
     interviewDate: document.querySelector("#interviewDate").value,
@@ -1224,16 +1258,54 @@ function mapUploadedFile(uploaded, prefix) {
   };
 }
 
+// Deleting removes the record right away (and queues the cloud delete), but
+// attached files are only removed once the Undo window has passed, so Undo can
+// restore the record exactly as it was.
+const DELETE_UNDO_MS = 8000;
+const pendingFileDeletes = new Map();
+
+function finalizeFileDeletes(id) {
+  const pending = pendingFileDeletes.get(id);
+  if (!pending) return;
+  pendingFileDeletes.delete(id);
+  clearTimeout(pending.timer);
+  pending.paths.forEach((path) => deleteCvFile(path));
+}
+
 async function deleteCurrent() {
   const id = document.querySelector("#recordId").value;
   const previous = applications.find((app) => app.id === id);
-  if (previous?.cvStoragePath) await deleteCvFile(previous.cvStoragePath);
-  if (previous?.clStoragePath) await deleteCvFile(previous.clStoragePath);
+  if (!previous) return;
   applications = applications.filter((app) => app.id !== id);
   markDeleted(id);
   saveApplications();
   closeDrawer();
   renderAll();
+
+  const paths = [previous.cvStoragePath, previous.clStoragePath].filter(Boolean);
+  if (paths.length) {
+    pendingFileDeletes.set(id, { paths, timer: setTimeout(() => finalizeFileDeletes(id), DELETE_UNDO_MS) });
+  }
+  showToast(`Deleted ${previous.company || "application"}${previous.role ? ` · ${previous.role}` : ""}.`, {
+    duration: DELETE_UNDO_MS,
+    action: {
+      label: "Undo",
+      onClick: () => {
+        const pending = pendingFileDeletes.get(id);
+        if (pending) {
+          clearTimeout(pending.timer);
+          pendingFileDeletes.delete(id);
+        }
+        // A fresh updatedAt re-creates the row on the next sync.
+        const restored = normalizeApplication({ ...previous, updatedAt: new Date().toISOString() });
+        applications.unshift(restored);
+        markDirty(restored);
+        saveApplications();
+        renderAll();
+        showToast(`Restored ${restored.company || "application"}.`, { type: "success", duration: 3000 });
+      },
+    },
+  });
 }
 
 function exportData() {
@@ -1332,7 +1404,7 @@ async function initSupabase() {
     return;
   }
 
-  updateSyncStatus("Backend configured");
+  updateSyncStatus("Connecting...");
   let initialSession = null;
   try {
     const { data } = await supabaseClient.auth.getSession();
@@ -1388,6 +1460,7 @@ function setAuthView(isSignedIn) {
     ? `${activeDataUserEmail}${activeDataUserId !== currentUser?.id ? " (viewing)" : ""}`
     : currentUser?.email || "Not signed in";
   els.adminNav?.classList.toggle("hidden", !isCurrentAdmin());
+  document.querySelector("#openSyncBtn")?.classList.toggle("hidden", !isCurrentAdmin());
   els.adminPanel?.classList.toggle("hidden", !isCurrentAdmin());
   const demo = isSignedIn && currentUser?.email?.toLowerCase() === RUNTIME_CONFIG.demoEmail;
   els.demoBanner.classList.toggle("hidden", !demo);
@@ -1644,7 +1717,7 @@ async function deleteDirectOwnData(id) {
 
 async function loadFromBackend() {
   if (!supabaseClient || !currentUser) return;
-  updateSyncStatus("Loading backend data...");
+  updateSyncStatus("Loading your applications...");
   let data;
   let loadedCloudApps;
   try {
@@ -2075,6 +2148,8 @@ function applyImportedJob(job, linkInput) {
   if (job.jobDescription) document.querySelector("#jobDescription").value = job.jobDescription;
   if (CATEGORIES.includes(job.category)) document.querySelector("#category").value = job.category;
   if (SOURCES.includes(job.source)) document.querySelector("#source").value = job.source;
+  if (job.jobDescription) document.querySelector("#sectionJob").open = true;
+  updateFormSectionHints(currentDrawerApp());
 
   const imported = [
     job.company && "company",
@@ -2298,6 +2373,30 @@ document.querySelector("#demoPassword").textContent = RUNTIME_CONFIG.demoPasswor
 els.signUpBtn.addEventListener("click", signUp);
 document.querySelector("#signOutBtn").addEventListener("click", signOut);
 document.querySelector("#closeFormBtn").addEventListener("click", closeDrawer);
+document.querySelector("#cancelFormBtn").addEventListener("click", closeDrawer);
+const accountMenu = document.querySelector("#accountMenu");
+accountMenu.querySelector(".account-menu-panel").addEventListener("click", (event) => {
+  // The import label opens a file picker; close after the other items.
+  if (event.target.closest("button.menu-item")) accountMenu.open = false;
+});
+document.querySelector("#importInput").addEventListener("change", () => {
+  accountMenu.open = false;
+});
+document.addEventListener("click", (event) => {
+  if (accountMenu.open && !accountMenu.contains(event.target)) accountMenu.open = false;
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && accountMenu.open) {
+    accountMenu.open = false;
+    accountMenu.querySelector("summary").focus();
+  }
+});
+els.form.addEventListener("input", () => updateFormSectionHints(currentDrawerApp()));
+els.form.addEventListener("change", () => updateFormSectionHints(currentDrawerApp()));
+window.addEventListener("pagehide", () => {
+  // Leaving the page ends the Undo window for any deleted application.
+  [...pendingFileDeletes.keys()].forEach(finalizeFileDeletes);
+});
 els.drawerBackdrop.addEventListener("click", closeDrawer);
 els.form.addEventListener("submit", upsertApplication);
 els.deleteBtn.addEventListener("click", deleteCurrent);
