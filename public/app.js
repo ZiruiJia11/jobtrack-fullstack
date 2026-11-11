@@ -72,7 +72,11 @@ let currentUser = null;
 let activeDataUserId = "";
 let activeDataUserEmail = "";
 let adminUsers = [];
-let isSyncing = false;
+let syncInFlight = null;
+let syncRequested = false;
+let syncRetryTimer = null;
+const SYNC_STATE_PREFIX = "jobtrack.sync.v1";
+const SYNC_RETRY_MS = 30_000;
 
 const els = {
   loginScreen: document.querySelector("#loginScreen"),
@@ -283,7 +287,225 @@ function saveApplications({ skipCloud = false } = {}) {
   if (activeDataUserId) {
     localStorage.setItem(cacheKeyForUser(activeDataUserId), JSON.stringify(withoutExamples(applications)));
   }
-  if (!skipCloud) syncAllToBackend();
+  if (!skipCloud) scheduleSync();
+}
+
+// --- Sync queue -------------------------------------------------------------
+// Each user has a persisted record of changes that have not reached the cloud
+// yet: `dirty` maps application id -> updatedAt of the local edit, `deleted`
+// lists ids removed locally. The cloud is the source of truth for everything
+// else, so a record deleted on another device is not re-uploaded from a stale
+// local cache, and an edit made while a sync is running is never dropped.
+
+function syncStateKey(userId) {
+  return `${SYNC_STATE_PREFIX}.${userId}`;
+}
+
+function loadSyncState(userId) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(syncStateKey(userId)) || "null");
+    if (parsed && typeof parsed === "object") {
+      return {
+        initialized: parsed.initialized === true,
+        dirty: parsed.dirty && typeof parsed.dirty === "object" ? parsed.dirty : {},
+        deleted: Array.isArray(parsed.deleted) ? parsed.deleted : [],
+      };
+    }
+  } catch {
+    // Fall through to an empty state.
+  }
+  return { initialized: false, dirty: {}, deleted: [] };
+}
+
+function saveSyncState(userId, state) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(syncStateKey(userId), JSON.stringify(state));
+  } catch {
+    // Storage full or blocked: the in-memory edit still syncs this session.
+  }
+}
+
+function pendingChangeCount(userId = activeDataUserId) {
+  if (!userId) return 0;
+  const state = loadSyncState(userId);
+  return Object.keys(state.dirty).length + state.deleted.length;
+}
+
+function markDirty(app) {
+  if (!activeDataUserId || isExampleApplication(app)) return;
+  const state = loadSyncState(activeDataUserId);
+  state.dirty[app.id] = app.updatedAt;
+  state.deleted = state.deleted.filter((id) => id !== app.id);
+  saveSyncState(activeDataUserId, state);
+}
+
+function markDeleted(id) {
+  if (!activeDataUserId) return;
+  const state = loadSyncState(activeDataUserId);
+  delete state.dirty[id];
+  if (!state.deleted.includes(id)) state.deleted.push(id);
+  saveSyncState(activeDataUserId, state);
+}
+
+function readCachedApplications(userId) {
+  try {
+    return normalizeApplications(JSON.parse(localStorage.getItem(cacheKeyForUser(userId)) || "[]"));
+  } catch {
+    return [];
+  }
+}
+
+// Combine cloud rows with local state. Cloud wins unless the record has a
+// pending local edit that is at least as new; pending deletes are hidden.
+function reconcileApplications(cloudApps, localApps, state) {
+  const deleted = new Set(state.deleted);
+  const result = new Map();
+  cloudApps.forEach((app) => {
+    if (!deleted.has(app.id)) result.set(app.id, app);
+  });
+  localApps.forEach((app) => {
+    if (!(app.id in state.dirty) || deleted.has(app.id)) return;
+    const cloud = result.get(app.id);
+    if (!cloud || String(app.updatedAt || "") >= String(cloud.updatedAt || "")) {
+      result.set(app.id, app);
+    } else {
+      // Another device saved a newer version; keep it and drop the stale edit.
+      delete state.dirty[app.id];
+    }
+  });
+  Object.keys(state.dirty).forEach((id) => {
+    if (!localApps.some((app) => app.id === id)) delete state.dirty[id];
+  });
+  return [...result.values()];
+}
+
+// One-time migration for caches written before the sync queue existed: keep
+// any local record the cloud does not have (or has an older copy of) by
+// queueing it, so upgrading never loses an edit that failed to sync.
+function seedSyncStateFromLegacyCache(state, cloudApps, localApps) {
+  const cloudById = new Map(cloudApps.map((app) => [app.id, app]));
+  localApps.forEach((app) => {
+    const cloud = cloudById.get(app.id);
+    if (!cloud || String(app.updatedAt || "") > String(cloud.updatedAt || "")) {
+      state.dirty[app.id] = app.updatedAt;
+    }
+  });
+  state.initialized = true;
+}
+
+function scheduleSync() {
+  syncRequested = true;
+  if (!syncInFlight) {
+    syncInFlight = (async () => {
+      try {
+        while (syncRequested) {
+          syncRequested = false;
+          await flushPendingChanges();
+        }
+      } finally {
+        syncInFlight = null;
+      }
+    })();
+  }
+  return syncInFlight;
+}
+
+function scheduleSyncRetry() {
+  if (syncRetryTimer) return;
+  syncRetryTimer = setTimeout(() => {
+    syncRetryTimer = null;
+    if (pendingChangeCount() > 0) scheduleSync();
+  }, SYNC_RETRY_MS);
+}
+
+async function pushUpserts(userId, apps) {
+  if (!apps.length) return;
+  try {
+    await apiRequest("/api/applications", {
+      method: "POST",
+      body: JSON.stringify({ applications: apps, userId }),
+    });
+  } catch (error) {
+    if (!(currentUser && userId === currentUser.id && canUseDirectOwnData())) throw error;
+    await syncDirectOwnData(apps);
+  }
+}
+
+async function pushDelete(userId, id) {
+  const userQuery = currentUser && userId !== currentUser.id ? `&userId=${encodeURIComponent(userId)}` : "";
+  try {
+    await apiRequest(`/api/applications?id=${encodeURIComponent(id)}${userQuery}`, { method: "DELETE" });
+  } catch (error) {
+    if (!(currentUser && userId === currentUser.id && canUseDirectOwnData())) throw error;
+    await deleteDirectOwnData(id);
+  }
+}
+
+async function flushPendingChanges() {
+  if (!supabaseClient || !currentUser || !activeDataUserId) return;
+  const userId = activeDataUserId;
+  const userLabel = activeDataUserEmail || "this user";
+  const snapshot = loadSyncState(userId);
+  const cached = readCachedApplications(userId);
+  const toSave = cached.filter((app) => app.id in snapshot.dirty && !isExampleApplication(app));
+  const toDelete = [...snapshot.deleted];
+  const uploadable = new Set(toSave.map((app) => app.id));
+  const orphans = Object.keys(snapshot.dirty).filter((id) => !uploadable.has(id));
+  if (orphans.length) {
+    // Queued ids with no cached record have nothing left to upload.
+    orphans.forEach((id) => delete snapshot.dirty[id]);
+    saveSyncState(userId, snapshot);
+  }
+  if (!toSave.length && !toDelete.length) {
+    if (userId === activeDataUserId) {
+      updateSyncStatus(`All changes saved · ${withoutExamples(applications).length} apps for ${userLabel}`);
+    }
+    return;
+  }
+
+  updateSyncStatus(`Saving ${toSave.length + toDelete.length} change(s)...`);
+  let failure = null;
+  const savedVersions = {};
+  try {
+    await pushUpserts(userId, toSave);
+    toSave.forEach((app) => {
+      savedVersions[app.id] = snapshot.dirty[app.id];
+    });
+  } catch (error) {
+    failure = error;
+  }
+  const deletedOk = [];
+  for (const id of toDelete) {
+    try {
+      await pushDelete(userId, id);
+      deletedOk.push(id);
+    } catch (error) {
+      failure = failure || error;
+    }
+  }
+
+  // Re-read the state: edits made while the request was in flight stay queued.
+  const state = loadSyncState(userId);
+  Object.entries(savedVersions).forEach(([id, version]) => {
+    if (state.dirty[id] === version) delete state.dirty[id];
+  });
+  state.deleted = state.deleted.filter((id) => !deletedOk.includes(id));
+  saveSyncState(userId, state);
+
+  const remaining = Object.keys(state.dirty).length + state.deleted.length;
+  if (userId !== activeDataUserId) return;
+  if (failure) {
+    updateSyncStatus(
+      `Not synced: ${remaining} change(s) waiting. ${failure.message} Retrying automatically.`,
+      "warning",
+    );
+    scheduleSyncRetry();
+  } else if (remaining > 0) {
+    syncRequested = true;
+  } else {
+    updateSyncStatus(`All changes saved · ${withoutExamples(applications).length} apps for ${userLabel}`);
+  }
 }
 
 function loadSupabaseConfig() {
@@ -748,6 +970,7 @@ async function upsertApplication(event) {
   const index = applications.findIndex((item) => item.id === id);
   if (index >= 0) applications[index] = app;
   else applications.unshift(app);
+  markDirty(app);
   saveApplications();
   closeDrawer();
   renderAll();
@@ -814,8 +1037,8 @@ async function deleteCurrent() {
   if (previous?.cvStoragePath) await deleteCvFile(previous.cvStoragePath);
   if (previous?.clStoragePath) await deleteCvFile(previous.clStoragePath);
   applications = applications.filter((app) => app.id !== id);
+  markDeleted(id);
   saveApplications();
-  deleteFromCloud(id);
   closeDrawer();
   renderAll();
 }
@@ -836,7 +1059,10 @@ function importData(file) {
     try {
       const parsed = JSON.parse(reader.result);
       if (!Array.isArray(parsed)) throw new Error("Expected an array");
-      applications = normalizeApplications(parsed);
+      const imported = withoutExamples(normalizeApplications(parsed));
+      // Importing adds or updates records; it never deletes cloud records.
+      applications = mergeApplications(applications, imported);
+      imported.forEach(markDirty);
       saveApplications();
       renderAll();
     } catch {
@@ -918,7 +1144,6 @@ async function initSupabase() {
     updateSyncStatus(`Signed in: ${currentUser.email || "anonymous user"}`);
     if (isCurrentAdmin()) await loadAdminUsers();
     await loadFromBackend();
-    await syncAllToBackend();
   } else {
     setAuthView(false);
     updateSyncStatus("Sign in to sync.");
@@ -933,7 +1158,6 @@ async function initSupabase() {
       updateSyncStatus(`Signed in: ${currentUser.email || "anonymous user"}`);
       if (isCurrentAdmin()) await loadAdminUsers();
       await loadFromBackend();
-      await syncAllToBackend();
     } else {
       activeDataUserId = "";
       activeDataUserEmail = "";
@@ -1095,8 +1319,9 @@ async function createAdminUser(event) {
   }
 }
 
-function updateSyncStatus(message) {
+function updateSyncStatus(message, type = "info") {
   els.syncStatus.textContent = message;
+  els.syncStatus.classList.toggle("sync-warning", type === "warning");
 }
 
 async function authHeaders(includeJson = true) {
@@ -1198,11 +1423,19 @@ async function loadFromBackend() {
 
   const cloudApps = withoutExamples(loadedCloudApps);
   await deleteExampleRowsFromBackend(loadedCloudApps.filter(isExampleApplication));
-  const localApps = loadApplicationsForUser(activeDataUserId, activeDataUserEmail);
-  applications = mergeApplications(localApps, cloudApps);
+  const userId = activeDataUserId;
+  const localApps = withoutExamples(loadApplicationsForUser(userId, activeDataUserEmail));
+  const state = loadSyncState(userId);
+  if (!state.initialized) seedSyncStateFromLegacyCache(state, cloudApps, localApps);
+  applications = reconcileApplications(cloudApps, localApps, state);
+  saveSyncState(userId, state);
   saveApplications({ skipCloud: true });
-  updateSyncStatus(`Synced ${withoutExamples(applications).length} apps for ${activeDataUserEmail || "this user"}`);
   renderAll();
+  if (pendingChangeCount(userId) > 0) {
+    await scheduleSync();
+  } else {
+    updateSyncStatus(`All changes saved · ${withoutExamples(applications).length} apps for ${activeDataUserEmail || "this user"}`);
+  }
 }
 
 function mergeApplications(localApps, cloudApps) {
@@ -1233,52 +1466,6 @@ async function deleteExampleRowsFromBackend(exampleApps) {
       ),
     ),
   );
-}
-
-async function syncAllToBackend() {
-  if (isSyncing || !supabaseClient || !currentUser) return;
-  isSyncing = true;
-  const realApps = withoutExamples(applications);
-  try {
-    await apiRequest("/api/applications", {
-      method: "POST",
-      body: JSON.stringify({ applications: realApps, userId: activeDataUserId || currentUser.id }),
-    });
-    updateSyncStatus(`Synced ${realApps.length} apps for ${activeDataUserEmail || "this user"}`);
-  } catch (error) {
-    if (!canUseDirectOwnData()) {
-      updateSyncStatus(`Sync error: ${error.message}`);
-    } else {
-      try {
-        await syncDirectOwnData(realApps);
-        updateSyncStatus(`Synced ${realApps.length} apps with direct Supabase access.`);
-      } catch (directError) {
-        updateSyncStatus(`Sync error: ${directError.message}`);
-      }
-    }
-  }
-  isSyncing = false;
-}
-
-async function deleteFromCloud(id) {
-  if (!supabaseClient || !currentUser) return;
-  const userQuery =
-    isCurrentAdmin() && activeDataUserId && activeDataUserId !== currentUser.id
-      ? `&userId=${encodeURIComponent(activeDataUserId)}`
-      : "";
-  try {
-    await apiRequest(`/api/applications?id=${encodeURIComponent(id)}${userQuery}`, { method: "DELETE" });
-  } catch (error) {
-    if (!canUseDirectOwnData()) {
-      updateSyncStatus(`Delete sync error: ${error.message}`);
-    } else {
-      try {
-        await deleteDirectOwnData(id);
-      } catch (directError) {
-        updateSyncStatus(`Delete sync error: ${directError.message}`);
-      }
-    }
-  }
 }
 
 async function downloadCvFile(appId) {
@@ -1417,6 +1604,18 @@ async function signUp(event) {
 }
 
 async function signOut() {
+  if (currentUser) {
+    if (pendingChangeCount() > 0) await scheduleSync();
+    const pending = pendingChangeCount();
+    if (
+      pending > 0 &&
+      !confirm(
+        `${pending} change(s) have not reached the cloud yet. They stay saved on this device and will sync the next time you sign in here. Sign out anyway?`,
+      )
+    ) {
+      return;
+    }
+  }
   if (supabaseClient) await supabaseClient.auth.signOut();
   currentUser = null;
   activeDataUserId = "";
@@ -1887,6 +2086,19 @@ document.querySelector("#importInput").addEventListener("change", (event) => {
 });
 
 window.addEventListener("hashchange", restoreNavFromHash);
+window.addEventListener("online", () => {
+  if (pendingChangeCount() > 0) scheduleSync();
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && pendingChangeCount() > 0) scheduleSync();
+});
+window.addEventListener("beforeunload", (event) => {
+  if (currentUser && syncInFlight && pendingChangeCount() > 0) {
+    // Queued changes survive a reload; only warn while an upload is running.
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});
 document.querySelectorAll(".nav-item").forEach((item) => {
   item.addEventListener("click", () => {
     els.navDropdown.open = false;

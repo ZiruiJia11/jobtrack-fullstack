@@ -1696,3 +1696,8 @@ button:disabled {
 .demo-banner p { margin: 5px 0 0; font-size: 13px; color: #3c635b; }
 .agent-action-buttons { justify-content: flex-end; }
 #agentUsage { margin-bottom: 12px; }
+
+#syncStatus.sync-warning {
+  color: var(--red);
+  font-weight: 600;
+}
