@@ -1701,3 +1701,347 @@ button:disabled {
   color: var(--red);
   font-weight: 600;
 }
+
+/* --- Pipeline view toggle ------------------------------------------------ */
+.panel-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.view-toggle {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--gray-soft);
+}
+
+.view-toggle-btn {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.view-toggle-btn.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(18, 35, 63, 0.12);
+}
+
+/* --- Inline status select ------------------------------------------------ */
+.status-select {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+  padding-right: 24px;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 13px) 50%, calc(100% - 9px) 50%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+}
+
+.status-select:hover {
+  border-color: currentColor;
+}
+
+.status-select:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+}
+
+.status-select option {
+  background: #fff;
+  color: var(--text);
+}
+
+.due-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.due-badge.overdue {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+/* --- Board --------------------------------------------------------------- */
+.board {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(220px, 1fr);
+  gap: 12px;
+  padding: 14px;
+  overflow-x: auto;
+  min-height: 320px;
+}
+
+.board.hidden {
+  display: none;
+}
+
+.board-column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7faff;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.board-column.drop-target,
+.drop-chip.drop-target {
+  border-color: var(--blue);
+  background: var(--surface-soft);
+  box-shadow: var(--ring);
+}
+
+.board-column-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.board-column-head .status-pill {
+  min-width: 0;
+}
+
+.board-column-head strong {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.drop-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.drop-chip {
+  padding: 5px 9px;
+  border: 1px dashed var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--surface);
+}
+
+.board.is-dragging .drop-chip {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.board-cards {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  flex: 1;
+}
+
+.board-empty {
+  margin: 0;
+  padding: 18px 8px;
+  border: 1px dashed var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.board-card {
+  display: grid;
+  gap: 4px;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(18, 35, 63, 0.06);
+  cursor: grab;
+}
+
+.board-card.dragging {
+  opacity: 0.45;
+}
+
+.board-card-title {
+  font-weight: 800;
+  font-size: 14px;
+}
+
+.board-card-role {
+  font-size: 13px;
+}
+
+.board-card-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.board-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.status-select.compact-select {
+  min-width: 0;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  font-size: 11px;
+}
+
+/* --- Form: collapsible stage dates --------------------------------------- */
+.form-more {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.form-more summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.form-more summary .muted {
+  font-weight: 500;
+  font-size: 12px;
+  margin-left: 6px;
+}
+
+.form-more[open] summary {
+  margin-bottom: 10px;
+}
+
+/* --- Status history timeline --------------------------------------------- */
+.status-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.status-timeline li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+/* --- Toasts -------------------------------------------------------------- */
+.toast-region {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 1000;
+  display: grid;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 32px));
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px 11px 14px;
+  border-radius: 8px;
+  background: var(--navy);
+  color: #fff;
+  font-size: 14px;
+  box-shadow: var(--shadow);
+  animation: toast-in 0.18s ease-out;
+}
+
+.toast span {
+  flex: 1;
+}
+
+.toast-success {
+  background: #0f5132;
+}
+
+.toast-error {
+  background: #8a1c14;
+}
+
+.toast-action,
+.toast-close {
+  border: 0;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.toast-action {
+  font-weight: 800;
+  text-decoration: underline;
+}
+
+.toast-close {
+  font-size: 18px;
+  line-height: 1;
+  opacity: 0.75;
+}
+
+@keyframes toast-in {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
+
+/* --- Mobile: compact application cards ----------------------------------- */
+@media (max-width: 760px) {
+  .cell-secondary {
+    display: none !important;
+  }
+
+  .panel-head-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .board {
+    grid-auto-columns: minmax(78vw, 1fr);
+    scroll-snap-type: x mandatory;
+  }
+
+  .board-column {
+    scroll-snap-align: start;
+  }
+
+  .toast-region {
+    left: 16px;
+    right: 16px;
+    max-width: none;
+  }
+}

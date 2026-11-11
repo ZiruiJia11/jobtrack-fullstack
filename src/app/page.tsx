@@ -120,8 +120,15 @@ const pageMarkup = String.raw`
         <section class="table-panel" id="applications">
           <div class="panel-head">
             <h2>Application pipeline</h2>
-            <span id="resultCount"></span>
+            <div class="panel-head-actions">
+              <span id="resultCount"></span>
+              <div class="view-toggle" role="group" aria-label="Pipeline view">
+                <button type="button" class="view-toggle-btn active" data-view-mode="table" aria-pressed="true">Table</button>
+                <button type="button" class="view-toggle-btn" data-view-mode="board" aria-pressed="false">Board</button>
+              </div>
+            </div>
           </div>
+          <div class="board hidden" id="boardView" aria-label="Applications board"></div>
           <div class="table-wrap">
             <table>
               <thead>
@@ -219,14 +226,17 @@ const pageMarkup = String.raw`
         <label>Applied date *<input id="appliedDate" type="date" required /></label>
         <label>Follow-up date<input id="followUpDate" type="date" /></label>
       </div>
-      <div class="two-col">
-        <label>Screen date<input id="screenDate" type="date" /></label>
-        <label>Interview date<input id="interviewDate" type="date" /></label>
-      </div>
-      <div class="two-col">
-        <label>Final date<input id="finalDate" type="date" /></label>
-        <label>Decision date<input id="decisionDate" type="date" /></label>
-      </div>
+      <details class="form-more" id="stageDates">
+        <summary>Stage dates <span class="muted">Filled in automatically when the status changes</span></summary>
+        <div class="two-col">
+          <label>Screen date<input id="screenDate" type="date" /></label>
+          <label>Interview date<input id="interviewDate" type="date" /></label>
+        </div>
+        <div class="two-col">
+          <label>Final date<input id="finalDate" type="date" /></label>
+          <label>Decision date<input id="decisionDate" type="date" /></label>
+        </div>
+      </details>
       <label>Job description<textarea id="jobDescription" rows="6" placeholder="Paste the JD here so you can review it later..."></textarea></label>
       <section class="agent-panel application-agent" aria-labelledby="agentTitle">
         <div class="agent-panel-head">
@@ -333,6 +343,10 @@ const pageMarkup = String.raw`
         <p class="muted" id="detailsSubTitle"></p>
       </div>
       <button class="icon-button" id="closeDetailsBtn" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="detail-section">
+      <h3>Status history</h3>
+      <ol class="status-timeline" id="detailsHistory"></ol>
     </div>
     <div class="detail-section">
       <h3>Job description</h3>
