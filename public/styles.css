@@ -2045,3 +2045,219 @@ button:disabled {
     max-width: none;
   }
 }
+
+/* --- Application form: quick fields + collapsible sections --------------- */
+.application-modal form > .form-full,
+.form-section-body > .form-full,
+.form-section-body > .application-agent {
+  grid-column: 1 / -1;
+}
+
+.form-row-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 11px;
+}
+
+.form-section {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.form-section > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.form-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.form-section > summary::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+  align-self: center;
+}
+
+.form-section[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+.form-section > summary:hover {
+  background: #f8fbff;
+}
+
+.form-section > summary:focus-visible,
+.account-menu > summary:focus-visible {
+  outline: none;
+  box-shadow: var(--ring);
+  border-radius: 8px;
+}
+
+.form-section-title {
+  font-weight: 800;
+  font-size: 14px;
+}
+
+.form-section-hint {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.form-section-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 13px;
+  padding: 4px 14px 14px;
+}
+
+.form-section .form-more .form-section-body {
+  padding: 0;
+}
+
+/* Save stays visible while scrolling a long form. */
+.application-modal form > .drawer-actions {
+  position: sticky;
+  bottom: -22px;
+  z-index: 3;
+  margin: 4px -22px -22px;
+  padding: 12px 22px;
+  background: rgba(255, 255, 255, 0.97);
+  border-top: 1px solid var(--line);
+}
+
+.drawer-actions-main {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.text-danger {
+  border: 0;
+  background: transparent;
+  color: var(--red);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 10px 4px;
+  cursor: pointer;
+}
+
+.text-danger:hover {
+  text-decoration: underline;
+}
+
+.text-danger.hidden {
+  display: none;
+}
+
+/* --- Account menu -------------------------------------------------------- */
+.account-menu {
+  position: relative;
+}
+
+.account-menu > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.account-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.account-menu > summary:hover .user-chip,
+.account-menu[open] .user-chip {
+  border-color: #b8c7dc;
+  color: var(--text);
+}
+
+.account-menu[open] .nav-chevron {
+  transform: rotate(225deg) translate(-2px, -2px);
+}
+
+.account-menu-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  min-width: 200px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.menu-item {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: var(--surface-soft);
+  outline: none;
+}
+
+.menu-item.hidden {
+  display: none;
+}
+
+.menu-item-danger {
+  color: var(--red);
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 6px 6px;
+  margin-top: 4px;
+}
+
+@media (max-width: 760px) {
+  .form-row-3,
+  .form-section-body {
+    grid-template-columns: 1fr;
+  }
+
+  .application-modal form > .drawer-actions {
+    bottom: -18px;
+    margin: 4px -18px -18px;
+    padding: 12px 18px;
+  }
+
+  .topbar-actions {
+    flex-direction: row !important;
+    justify-content: space-between;
+  }
+
+  .account-menu-panel {
+    left: 0;
+    right: auto;
+  }
+}
