@@ -77,6 +77,23 @@ export async function POST(request: Request) {
   }
 
   const rows = applications.map((app: ApplicationPayload) => rowFromApplication(app, requestedUserId));
+
+  if (isAdmin) {
+    // The service role bypasses RLS, so make sure an admin write never moves
+    // an existing application from one user to another.
+    const ids = rows.map((row: { id?: string }) => row.id).filter((id: unknown): id is string => typeof id === "string");
+    if (ids.length) {
+      const { data: existing, error: lookupError } = await getSupabaseAdmin()
+        .from(TABLE_NAME)
+        .select("id, user_id")
+        .in("id", ids);
+      if (lookupError) return NextResponse.json({ error: lookupError.message }, { status: 500 });
+      if ((existing || []).some((row) => row.user_id !== requestedUserId)) {
+        return NextResponse.json({ error: "One or more applications belong to a different user." }, { status: 409 });
+      }
+    }
+  }
+
   // RLS checks the existing row as well as the proposed owner during an upsert.
   const writer = isAdmin ? getSupabaseAdmin() : getSupabaseForRequest(request);
   const { error } = await writer.from(TABLE_NAME).upsert(rows, { onConflict: "id" });
