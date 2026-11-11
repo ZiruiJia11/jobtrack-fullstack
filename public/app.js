@@ -72,7 +72,11 @@ let currentUser = null;
 let activeDataUserId = "";
 let activeDataUserEmail = "";
 let adminUsers = [];
-let isSyncing = false;
+let syncInFlight = null;
+let syncRequested = false;
+let syncRetryTimer = null;
+const SYNC_STATE_PREFIX = "jobtrack.sync.v1";
+const SYNC_RETRY_MS = 30_000;
 
 const els = {
   loginScreen: document.querySelector("#loginScreen"),
@@ -119,6 +123,10 @@ const els = {
   detailsTitle: document.querySelector("#detailsTitle"),
   detailsSubTitle: document.querySelector("#detailsSubTitle"),
   detailsJd: document.querySelector("#detailsJd"),
+  detailsHistory: document.querySelector("#detailsHistory"),
+  boardView: document.querySelector("#boardView"),
+  tableWrap: document.querySelector(".table-wrap"),
+  stageDates: document.querySelector("#stageDates"),
   detailsCl: document.querySelector("#detailsCl"),
   detailsCv: document.querySelector("#detailsCv"),
   detailsClFile: document.querySelector("#detailsClFile"),
@@ -197,9 +205,52 @@ function normalizeApplication(app) {
     cvStoragePath: app.cvStoragePath || "",
     cvFileData: app.cvFileData || "",
     notes: app.notes || "",
+    statusHistory: Array.isArray(app.statusHistory)
+      ? app.statusHistory.filter((entry) => entry && entry.status && entry.date)
+      : [],
     updatedAt: app.updatedAt || new Date().toISOString(),
     isExample: app.isExample === true,
   };
+}
+
+// --- Status history ---------------------------------------------------------
+// Which stage-date field a status fills in when the application reaches it.
+const STAGE_DATE_FIELD = {
+  Applied: "appliedDate",
+  Screening: "screenDate",
+  Interview: "interviewDate",
+  "Take-home": "interviewDate",
+  Final: "finalDate",
+  Offer: "decisionDate",
+  Rejected: "decisionDate",
+  Withdrawn: "decisionDate",
+};
+const CLOSED_STATUSES = ["Offer", "Rejected", "Withdrawn"];
+
+// Records saved before history existed get one inferred starting entry.
+function statusHistoryFor(app) {
+  if (app.statusHistory?.length) return app.statusHistory;
+  return [{ status: app.status, date: app.appliedDate || (app.updatedAt || "").slice(0, 10) || todayIso(), inferred: true }];
+}
+
+function withStatus(app, status, date = todayIso()) {
+  if (app.status === status) return app;
+  const next = {
+    ...app,
+    status,
+    statusHistory: [...statusHistoryFor(app), { status, date }],
+    updatedAt: new Date().toISOString(),
+  };
+  const field = STAGE_DATE_FIELD[status];
+  if (field && !next[field]) next[field] = date;
+  return normalizeApplication(next);
+}
+
+function addDaysIso(iso, days) {
+  const date = parseDate(iso) || parseDate(todayIso());
+  date.setDate(date.getDate() + days);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
 }
 
 function normalizeApplications(items) {
@@ -237,8 +288,10 @@ function isExampleApplication(app) {
   );
 }
 
+// Local calendar date (UTC would give yesterday's date during NZ mornings).
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 }
 
 function parseDate(value) {
@@ -283,7 +336,225 @@ function saveApplications({ skipCloud = false } = {}) {
   if (activeDataUserId) {
     localStorage.setItem(cacheKeyForUser(activeDataUserId), JSON.stringify(withoutExamples(applications)));
   }
-  if (!skipCloud) syncAllToBackend();
+  if (!skipCloud) scheduleSync();
+}
+
+// --- Sync queue -------------------------------------------------------------
+// Each user has a persisted record of changes that have not reached the cloud
+// yet: `dirty` maps application id -> updatedAt of the local edit, `deleted`
+// lists ids removed locally. The cloud is the source of truth for everything
+// else, so a record deleted on another device is not re-uploaded from a stale
+// local cache, and an edit made while a sync is running is never dropped.
+
+function syncStateKey(userId) {
+  return `${SYNC_STATE_PREFIX}.${userId}`;
+}
+
+function loadSyncState(userId) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(syncStateKey(userId)) || "null");
+    if (parsed && typeof parsed === "object") {
+      return {
+        initialized: parsed.initialized === true,
+        dirty: parsed.dirty && typeof parsed.dirty === "object" ? parsed.dirty : {},
+        deleted: Array.isArray(parsed.deleted) ? parsed.deleted : [],
+      };
+    }
+  } catch {
+    // Fall through to an empty state.
+  }
+  return { initialized: false, dirty: {}, deleted: [] };
+}
+
+function saveSyncState(userId, state) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(syncStateKey(userId), JSON.stringify(state));
+  } catch {
+    // Storage full or blocked: the in-memory edit still syncs this session.
+  }
+}
+
+function pendingChangeCount(userId = activeDataUserId) {
+  if (!userId) return 0;
+  const state = loadSyncState(userId);
+  return Object.keys(state.dirty).length + state.deleted.length;
+}
+
+function markDirty(app) {
+  if (!activeDataUserId || isExampleApplication(app)) return;
+  const state = loadSyncState(activeDataUserId);
+  state.dirty[app.id] = app.updatedAt;
+  state.deleted = state.deleted.filter((id) => id !== app.id);
+  saveSyncState(activeDataUserId, state);
+}
+
+function markDeleted(id) {
+  if (!activeDataUserId) return;
+  const state = loadSyncState(activeDataUserId);
+  delete state.dirty[id];
+  if (!state.deleted.includes(id)) state.deleted.push(id);
+  saveSyncState(activeDataUserId, state);
+}
+
+function readCachedApplications(userId) {
+  try {
+    return normalizeApplications(JSON.parse(localStorage.getItem(cacheKeyForUser(userId)) || "[]"));
+  } catch {
+    return [];
+  }
+}
+
+// Combine cloud rows with local state. Cloud wins unless the record has a
+// pending local edit that is at least as new; pending deletes are hidden.
+function reconcileApplications(cloudApps, localApps, state) {
+  const deleted = new Set(state.deleted);
+  const result = new Map();
+  cloudApps.forEach((app) => {
+    if (!deleted.has(app.id)) result.set(app.id, app);
+  });
+  localApps.forEach((app) => {
+    if (!(app.id in state.dirty) || deleted.has(app.id)) return;
+    const cloud = result.get(app.id);
+    if (!cloud || String(app.updatedAt || "") >= String(cloud.updatedAt || "")) {
+      result.set(app.id, app);
+    } else {
+      // Another device saved a newer version; keep it and drop the stale edit.
+      delete state.dirty[app.id];
+    }
+  });
+  Object.keys(state.dirty).forEach((id) => {
+    if (!localApps.some((app) => app.id === id)) delete state.dirty[id];
+  });
+  return [...result.values()];
+}
+
+// One-time migration for caches written before the sync queue existed: keep
+// any local record the cloud does not have (or has an older copy of) by
+// queueing it, so upgrading never loses an edit that failed to sync.
+function seedSyncStateFromLegacyCache(state, cloudApps, localApps) {
+  const cloudById = new Map(cloudApps.map((app) => [app.id, app]));
+  localApps.forEach((app) => {
+    const cloud = cloudById.get(app.id);
+    if (!cloud || String(app.updatedAt || "") > String(cloud.updatedAt || "")) {
+      state.dirty[app.id] = app.updatedAt;
+    }
+  });
+  state.initialized = true;
+}
+
+function scheduleSync() {
+  syncRequested = true;
+  if (!syncInFlight) {
+    syncInFlight = (async () => {
+      try {
+        while (syncRequested) {
+          syncRequested = false;
+          await flushPendingChanges();
+        }
+      } finally {
+        syncInFlight = null;
+      }
+    })();
+  }
+  return syncInFlight;
+}
+
+function scheduleSyncRetry() {
+  if (syncRetryTimer) return;
+  syncRetryTimer = setTimeout(() => {
+    syncRetryTimer = null;
+    if (pendingChangeCount() > 0) scheduleSync();
+  }, SYNC_RETRY_MS);
+}
+
+async function pushUpserts(userId, apps) {
+  if (!apps.length) return;
+  try {
+    await apiRequest("/api/applications", {
+      method: "POST",
+      body: JSON.stringify({ applications: apps, userId }),
+    });
+  } catch (error) {
+    if (!(currentUser && userId === currentUser.id && canUseDirectOwnData())) throw error;
+    await syncDirectOwnData(apps);
+  }
+}
+
+async function pushDelete(userId, id) {
+  const userQuery = currentUser && userId !== currentUser.id ? `&userId=${encodeURIComponent(userId)}` : "";
+  try {
+    await apiRequest(`/api/applications?id=${encodeURIComponent(id)}${userQuery}`, { method: "DELETE" });
+  } catch (error) {
+    if (!(currentUser && userId === currentUser.id && canUseDirectOwnData())) throw error;
+    await deleteDirectOwnData(id);
+  }
+}
+
+async function flushPendingChanges() {
+  if (!supabaseClient || !currentUser || !activeDataUserId) return;
+  const userId = activeDataUserId;
+  const userLabel = activeDataUserEmail || "this user";
+  const snapshot = loadSyncState(userId);
+  const cached = readCachedApplications(userId);
+  const toSave = cached.filter((app) => app.id in snapshot.dirty && !isExampleApplication(app));
+  const toDelete = [...snapshot.deleted];
+  const uploadable = new Set(toSave.map((app) => app.id));
+  const orphans = Object.keys(snapshot.dirty).filter((id) => !uploadable.has(id));
+  if (orphans.length) {
+    // Queued ids with no cached record have nothing left to upload.
+    orphans.forEach((id) => delete snapshot.dirty[id]);
+    saveSyncState(userId, snapshot);
+  }
+  if (!toSave.length && !toDelete.length) {
+    if (userId === activeDataUserId) {
+      updateSyncStatus(`All changes saved · ${withoutExamples(applications).length} apps for ${userLabel}`);
+    }
+    return;
+  }
+
+  updateSyncStatus(`Saving ${toSave.length + toDelete.length} change(s)...`);
+  let failure = null;
+  const savedVersions = {};
+  try {
+    await pushUpserts(userId, toSave);
+    toSave.forEach((app) => {
+      savedVersions[app.id] = snapshot.dirty[app.id];
+    });
+  } catch (error) {
+    failure = error;
+  }
+  const deletedOk = [];
+  for (const id of toDelete) {
+    try {
+      await pushDelete(userId, id);
+      deletedOk.push(id);
+    } catch (error) {
+      failure = failure || error;
+    }
+  }
+
+  // Re-read the state: edits made while the request was in flight stay queued.
+  const state = loadSyncState(userId);
+  Object.entries(savedVersions).forEach(([id, version]) => {
+    if (state.dirty[id] === version) delete state.dirty[id];
+  });
+  state.deleted = state.deleted.filter((id) => !deletedOk.includes(id));
+  saveSyncState(userId, state);
+
+  const remaining = Object.keys(state.dirty).length + state.deleted.length;
+  if (userId !== activeDataUserId) return;
+  if (failure) {
+    updateSyncStatus(
+      `Not synced: ${remaining} change(s) waiting. ${failure.message} Retrying automatically.`,
+      "warning",
+    );
+    scheduleSyncRetry();
+  } else if (remaining > 0) {
+    syncRequested = true;
+  } else {
+    updateSyncStatus(`All changes saved · ${withoutExamples(applications).length} apps for ${userLabel}`);
+  }
 }
 
 function loadSupabaseConfig() {
@@ -381,9 +652,72 @@ function formatDate(value) {
   return value || "-";
 }
 
+function statusSelect(app, extraClass = "") {
+  const options = STATUSES.map(
+    (status) => `<option value="${status}"${status === app.status ? " selected" : ""}>${status}</option>`,
+  ).join("");
+  return `<select class="status-select status-pill ${statusClass(app.status)} ${extraClass}" data-status-for="${escapeHtml(app.id)}" aria-label="Status for ${escapeHtml(app.company || "application")}">${options}</select>`;
+}
+
+function changeStatus(id, status) {
+  const index = applications.findIndex((item) => item.id === id);
+  if (index < 0 || applications[index].status === status) return;
+  const before = applications[index];
+  const after = withStatus(before, status);
+  applications[index] = after;
+  markDirty(after);
+  saveApplications();
+  renderAll();
+  showToast(`${after.company || "Application"} moved to ${status}.`, {
+    type: "success",
+    action: {
+      label: "Undo",
+      onClick: () => {
+        const i = applications.findIndex((item) => item.id === id);
+        if (i < 0) return;
+        // A fresh updatedAt makes the restored copy win the next sync.
+        const restored = normalizeApplication({ ...before, updatedAt: new Date().toISOString() });
+        applications[i] = restored;
+        markDirty(restored);
+        saveApplications();
+        renderAll();
+      },
+    },
+  });
+}
+
+let pipelineView = "table";
+try {
+  if (localStorage.getItem("jobtrack.view") === "board") pipelineView = "board";
+} catch {
+  // Storage blocked: default to the table.
+}
+
+function setPipelineView(view) {
+  pipelineView = view === "board" ? "board" : "table";
+  try {
+    localStorage.setItem("jobtrack.view", pipelineView);
+  } catch {
+    // Not critical.
+  }
+  document.querySelectorAll("[data-view-mode]").forEach((button) => {
+    const active = button.dataset.viewMode === pipelineView;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  renderRows();
+}
+
 function renderRows() {
   const items = filteredApplications().sort((a, b) => (b.appliedDate || "").localeCompare(a.appliedDate || ""));
   els.resultCount.textContent = `${items.length} shown`;
+  const board = pipelineView === "board";
+  els.tableWrap.classList.toggle("hidden", board);
+  els.boardView.classList.toggle("hidden", !board);
+  if (board) {
+    renderBoard(items);
+    return;
+  }
   if (items.length === 0) {
     els.rows.innerHTML = `<tr><td colspan="11" class="empty-state">No applications match this view.</td></tr>`;
     return;
@@ -405,14 +739,14 @@ function renderRows() {
           </td>
           <td class="company-cell">${escapeHtml(app.company)}<span>${escapeHtml(app.source || "No source")}</span></td>
           <td>${escapeHtml(app.role)}</td>
-          <td>${escapeHtml(app.category || "Other")}</td>
-          <td>${link}</td>
-          <td>${formatDate(app.appliedDate)}</td>
-          <td>${formatDate(app.followUpDate)}</td>
-          <td><span class="status-pill ${statusClass(app.status)}">${escapeHtml(app.status)}</span></td>
-          <td>${app.jobDescription ? `<button class="text-button" type="button" data-view="${app.id}">View JD</button>` : "-"}</td>
-          <td>${materialTags(app)}</td>
-          <td>
+          <td class="cell-secondary">${escapeHtml(app.category || "Other")}</td>
+          <td class="cell-secondary">${link}</td>
+          <td class="cell-secondary">${formatDate(app.appliedDate)}</td>
+          <td>${followUpLabel(app)}</td>
+          <td>${statusSelect(app)}</td>
+          <td class="cell-secondary">${app.jobDescription ? `<button class="text-button" type="button" data-view="${app.id}">View JD</button>` : "-"}</td>
+          <td class="cell-secondary">${materialTags(app)}</td>
+          <td class="cell-secondary">
             <div class="probability-bar">
               <strong>${probability}%</strong>
               <div class="bar-track"><div class="bar-fill" style="width:${probability}%"></div></div>
@@ -422,6 +756,70 @@ function renderRows() {
       `;
     })
     .join("");
+}
+
+function followUpLabel(app) {
+  if (!app.followUpDate) return "-";
+  const days = daysUntil(app.followUpDate);
+  if (days === null || CLOSED_STATUSES.includes(app.status)) return escapeHtml(app.followUpDate);
+  if (days < 0) return `${escapeHtml(app.followUpDate)} <span class="due-badge overdue">Overdue</span>`;
+  if (days === 0) return `${escapeHtml(app.followUpDate)} <span class="due-badge overdue">Today</span>`;
+  if (days <= 7) return `${escapeHtml(app.followUpDate)} <span class="due-badge">In ${days}d</span>`;
+  return escapeHtml(app.followUpDate);
+}
+
+// Board columns. "Closed" groups three end states; it is dropped onto via
+// the reason chips so the resulting status is never a guess.
+const BOARD_COLUMNS = [
+  { key: "Saved", statuses: ["Saved"] },
+  { key: "Applied", statuses: ["Applied"] },
+  { key: "Screening", statuses: ["Screening"] },
+  { key: "Interview", statuses: ["Interview"] },
+  { key: "Take-home", statuses: ["Take-home"] },
+  { key: "Final", statuses: ["Final"] },
+  { key: "Offer", statuses: ["Offer"] },
+  { key: "Closed", statuses: ["Rejected", "Withdrawn", "No Response"] },
+];
+
+function renderBoard(items) {
+  els.boardView.innerHTML = BOARD_COLUMNS.map((column) => {
+    const cards = items.filter((app) => column.statuses.includes(app.status));
+    const closed = column.key === "Closed";
+    const dropAttr = closed ? "" : ` data-drop-status="${column.key}"`;
+    const chips = closed
+      ? `<div class="drop-chips">${column.statuses
+          .map((status) => `<span class="drop-chip" data-drop-status="${status}">${status}</span>`)
+          .join("")}</div>`
+      : "";
+    return `
+      <section class="board-column${closed ? " board-column-closed" : ""}"${dropAttr} aria-label="${column.key}">
+        <header class="board-column-head">
+          <span class="status-pill ${statusClass(column.statuses[0])}">${column.key}</span>
+          <strong>${cards.length}</strong>
+        </header>
+        ${chips}
+        <div class="board-cards">
+          ${
+            cards.length
+              ? cards.map(boardCard).join("")
+              : `<p class="board-empty">${closed ? "Drop on a reason above" : "Drop here"}</p>`
+          }
+        </div>
+      </section>`;
+  }).join("");
+}
+
+function boardCard(app) {
+  return `
+    <article class="board-card" draggable="true" data-card-id="${escapeHtml(app.id)}">
+      <div class="board-card-title">${escapeHtml(app.company || "Untitled")}</div>
+      <div class="board-card-role">${escapeHtml(app.role)}</div>
+      <div class="board-card-meta">${app.followUpDate ? `Follow-up ${followUpLabel(app)}` : `Applied ${formatDate(app.appliedDate)}`}</div>
+      <div class="board-card-actions">
+        ${statusSelect(app, "compact-select")}
+        <button class="edit-btn" type="button" data-edit="${escapeHtml(app.id)}">Edit</button>
+      </div>
+    </article>`;
 }
 
 function materialTags(app) {
@@ -632,8 +1030,12 @@ function openDrawer(app = null) {
   fields.forEach((field) => {
     document.querySelector(`#${field}`).value = app?.[field] || "";
   });
+  const followUpInput = document.querySelector("#followUpDate");
+  followUpInput.dataset.auto = app ? "" : "1";
+  els.stageDates.open = Boolean(app && (app.screenDate || app.interviewDate || app.finalDate || app.decisionDate));
   if (!app) {
     document.querySelector("#appliedDate").value = todayIso();
+    followUpInput.value = addDaysIso(todayIso(), 7);
     document.querySelector("#status").value = "Applied";
     document.querySelector("#source").value = "Company Website";
     document.querySelector("#category").value = "Other";
@@ -697,33 +1099,33 @@ async function upsertApplication(event) {
   };
   if (cvFile) {
     if (cvFile.size > 10 * 1024 * 1024) {
-      alert("This CV is larger than 10 MB. Please upload a smaller PDF/DOC/DOCX/TXT file.");
+      showToast("This CV is larger than 10 MB. Please upload a smaller PDF/DOC/DOCX/TXT file.", { type: "error", duration: 8000 });
       return;
     }
     try {
       updateSyncStatus("Uploading CV...");
       cvFields = await uploadMaterialFile(id, cvFile, previous?.cvStoragePath || "", "CV");
     } catch (error) {
-      alert(`Could not upload CV: ${error.message}`);
+      showToast(`Could not upload CV: ${error.message}`, { type: "error", duration: 8000 });
       updateSyncStatus(`CV upload error: ${error.message}`);
       return;
     }
   }
   if (clFile) {
     if (clFile.size > 10 * 1024 * 1024) {
-      alert("This cover letter file is larger than 10 MB. Please upload a smaller PDF/DOC/DOCX/TXT file.");
+      showToast("This cover letter file is larger than 10 MB. Please upload a smaller PDF/DOC/DOCX/TXT file.", { type: "error", duration: 8000 });
       return;
     }
     try {
       updateSyncStatus("Uploading cover letter file...");
       clFields = mapUploadedFile(await uploadMaterialFile(id, clFile, previous?.clStoragePath || "", "CL"), "cl");
     } catch (error) {
-      alert(`Could not upload cover letter file: ${error.message}`);
+      showToast(`Could not upload cover letter file: ${error.message}`, { type: "error", duration: 8000 });
       updateSyncStatus(`CL upload error: ${error.message}`);
       return;
     }
   }
-  const app = normalizeApplication({
+  const formApp = normalizeApplication({
     id,
     company: document.querySelector("#company").value.trim(),
     role: document.querySelector("#role").value.trim(),
@@ -743,14 +1145,28 @@ async function upsertApplication(event) {
     ...clFields,
     ...cvFields,
     notes: document.querySelector("#notes").value.trim(),
+    statusHistory: previous?.statusHistory || [],
     updatedAt: new Date().toISOString(),
   });
+  let app;
+  if (previous) {
+    // Dates typed in the form win; withStatus only fills empty stage dates.
+    app = withStatus({ ...formApp, status: previous.status, statusHistory: statusHistoryFor(previous) }, formApp.status);
+    if (app.status === previous.status) app = formApp;
+  } else {
+    const start = formApp.appliedDate || todayIso();
+    app = normalizeApplication({ ...formApp, statusHistory: [{ status: formApp.status, date: start }] });
+    const field = STAGE_DATE_FIELD[app.status];
+    if (field && !app[field]) app[field] = start;
+  }
   const index = applications.findIndex((item) => item.id === id);
   if (index >= 0) applications[index] = app;
   else applications.unshift(app);
+  markDirty(app);
   saveApplications();
   closeDrawer();
   renderAll();
+  showToast(previous ? "Application updated." : "Application added.", { type: "success", duration: 3000 });
 }
 
 function readFileAsDataUrl(file) {
@@ -814,8 +1230,8 @@ async function deleteCurrent() {
   if (previous?.cvStoragePath) await deleteCvFile(previous.cvStoragePath);
   if (previous?.clStoragePath) await deleteCvFile(previous.clStoragePath);
   applications = applications.filter((app) => app.id !== id);
+  markDeleted(id);
   saveApplications();
-  deleteFromCloud(id);
   closeDrawer();
   renderAll();
 }
@@ -836,11 +1252,15 @@ function importData(file) {
     try {
       const parsed = JSON.parse(reader.result);
       if (!Array.isArray(parsed)) throw new Error("Expected an array");
-      applications = normalizeApplications(parsed);
+      const imported = withoutExamples(normalizeApplications(parsed));
+      // Importing adds or updates records; it never deletes cloud records.
+      applications = mergeApplications(applications, imported);
+      imported.forEach(markDirty);
       saveApplications();
       renderAll();
+      showToast(`Imported ${imported.length} application(s).`, { type: "success" });
     } catch {
-      alert("Could not import this file. Please choose a JobTrack JSON export.");
+      showToast("Could not import this file. Please choose a JobTrack JSON export.", { type: "error", duration: 8000 });
     }
   };
   reader.readAsText(file);
@@ -849,6 +1269,16 @@ function importData(file) {
 function openDetails(app) {
   els.detailsTitle.textContent = app.company;
   els.detailsSubTitle.textContent = `${app.role} | ${app.category || "Other"} | ${app.status} | ${probabilityFor(app)}% probability`;
+  els.detailsHistory.innerHTML = [...statusHistoryFor(app)]
+    .reverse()
+    .map(
+      (entry) => `
+        <li>
+          <span class="status-pill ${statusClass(entry.status)}">${escapeHtml(entry.status)}</span>
+          <span>${escapeHtml(entry.date)}${entry.inferred ? ` <span class="muted">(recorded before history tracking)</span>` : ""}</span>
+        </li>`,
+    )
+    .join("");
   els.detailsJd.textContent = app.jobDescription || "No job description saved yet.";
   els.detailsCl.textContent = app.coverLetter || "No cover letter text saved yet.";
   if (app.clStoragePath) {
@@ -918,7 +1348,6 @@ async function initSupabase() {
     updateSyncStatus(`Signed in: ${currentUser.email || "anonymous user"}`);
     if (isCurrentAdmin()) await loadAdminUsers();
     await loadFromBackend();
-    await syncAllToBackend();
   } else {
     setAuthView(false);
     updateSyncStatus("Sign in to sync.");
@@ -933,7 +1362,6 @@ async function initSupabase() {
       updateSyncStatus(`Signed in: ${currentUser.email || "anonymous user"}`);
       if (isCurrentAdmin()) await loadAdminUsers();
       await loadFromBackend();
-      await syncAllToBackend();
     } else {
       activeDataUserId = "";
       activeDataUserEmail = "";
@@ -1095,8 +1523,52 @@ async function createAdminUser(event) {
   }
 }
 
-function updateSyncStatus(message) {
+function updateSyncStatus(message, type = "info") {
   els.syncStatus.textContent = message;
+  const wasWarning = els.syncStatus.classList.contains("sync-warning");
+  els.syncStatus.classList.toggle("sync-warning", type === "warning");
+  // Surface the first failure of a streak; the sidebar keeps the detail.
+  if (type === "warning" && !wasWarning) showToast(message, { type: "error", duration: 8000 });
+}
+
+// --- Toasts -----------------------------------------------------------------
+let toastRegion = null;
+
+function showToast(message, { type = "info", action = null, duration = 5000 } = {}) {
+  if (!toastRegion) {
+    toastRegion = document.createElement("div");
+    toastRegion.className = "toast-region";
+    toastRegion.setAttribute("role", "status");
+    toastRegion.setAttribute("aria-live", "polite");
+    document.body.appendChild(toastRegion);
+  }
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+  const text = document.createElement("span");
+  text.textContent = message;
+  toast.appendChild(text);
+  const dismiss = () => toast.remove();
+  if (action) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "toast-action";
+    button.textContent = action.label;
+    button.addEventListener("click", () => {
+      dismiss();
+      action.onClick();
+    });
+    toast.appendChild(button);
+  }
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "toast-close";
+  close.setAttribute("aria-label", "Dismiss");
+  close.textContent = "×";
+  close.addEventListener("click", dismiss);
+  toast.appendChild(close);
+  toastRegion.appendChild(toast);
+  while (toastRegion.children.length > 3) toastRegion.firstElementChild.remove();
+  setTimeout(dismiss, duration);
 }
 
 async function authHeaders(includeJson = true) {
@@ -1198,11 +1670,19 @@ async function loadFromBackend() {
 
   const cloudApps = withoutExamples(loadedCloudApps);
   await deleteExampleRowsFromBackend(loadedCloudApps.filter(isExampleApplication));
-  const localApps = loadApplicationsForUser(activeDataUserId, activeDataUserEmail);
-  applications = mergeApplications(localApps, cloudApps);
+  const userId = activeDataUserId;
+  const localApps = withoutExamples(loadApplicationsForUser(userId, activeDataUserEmail));
+  const state = loadSyncState(userId);
+  if (!state.initialized) seedSyncStateFromLegacyCache(state, cloudApps, localApps);
+  applications = reconcileApplications(cloudApps, localApps, state);
+  saveSyncState(userId, state);
   saveApplications({ skipCloud: true });
-  updateSyncStatus(`Synced ${withoutExamples(applications).length} apps for ${activeDataUserEmail || "this user"}`);
   renderAll();
+  if (pendingChangeCount(userId) > 0) {
+    await scheduleSync();
+  } else {
+    updateSyncStatus(`All changes saved · ${withoutExamples(applications).length} apps for ${activeDataUserEmail || "this user"}`);
+  }
 }
 
 function mergeApplications(localApps, cloudApps) {
@@ -1235,52 +1715,6 @@ async function deleteExampleRowsFromBackend(exampleApps) {
   );
 }
 
-async function syncAllToBackend() {
-  if (isSyncing || !supabaseClient || !currentUser) return;
-  isSyncing = true;
-  const realApps = withoutExamples(applications);
-  try {
-    await apiRequest("/api/applications", {
-      method: "POST",
-      body: JSON.stringify({ applications: realApps, userId: activeDataUserId || currentUser.id }),
-    });
-    updateSyncStatus(`Synced ${realApps.length} apps for ${activeDataUserEmail || "this user"}`);
-  } catch (error) {
-    if (!canUseDirectOwnData()) {
-      updateSyncStatus(`Sync error: ${error.message}`);
-    } else {
-      try {
-        await syncDirectOwnData(realApps);
-        updateSyncStatus(`Synced ${realApps.length} apps with direct Supabase access.`);
-      } catch (directError) {
-        updateSyncStatus(`Sync error: ${directError.message}`);
-      }
-    }
-  }
-  isSyncing = false;
-}
-
-async function deleteFromCloud(id) {
-  if (!supabaseClient || !currentUser) return;
-  const userQuery =
-    isCurrentAdmin() && activeDataUserId && activeDataUserId !== currentUser.id
-      ? `&userId=${encodeURIComponent(activeDataUserId)}`
-      : "";
-  try {
-    await apiRequest(`/api/applications?id=${encodeURIComponent(id)}${userQuery}`, { method: "DELETE" });
-  } catch (error) {
-    if (!canUseDirectOwnData()) {
-      updateSyncStatus(`Delete sync error: ${error.message}`);
-    } else {
-      try {
-        await deleteDirectOwnData(id);
-      } catch (directError) {
-        updateSyncStatus(`Delete sync error: ${directError.message}`);
-      }
-    }
-  }
-}
-
 async function downloadCvFile(appId) {
   const app = applications.find((item) => item.id === appId);
   if (!app?.cvStoragePath) return;
@@ -1294,7 +1728,7 @@ async function downloadCvFile(appId) {
     );
     window.location.href = data.signedUrl;
   } catch (error) {
-    alert(`Could not download CV: ${error.message}`);
+    showToast(`Could not download CV: ${error.message}`, { type: "error", duration: 8000 });
   }
 }
 
@@ -1311,7 +1745,7 @@ async function downloadClFile(appId) {
     );
     window.location.href = data.signedUrl;
   } catch (error) {
-    alert(`Could not download cover letter file: ${error.message}`);
+    showToast(`Could not download cover letter file: ${error.message}`, { type: "error", duration: 8000 });
   }
 }
 
@@ -1417,6 +1851,18 @@ async function signUp(event) {
 }
 
 async function signOut() {
+  if (currentUser) {
+    if (pendingChangeCount() > 0) await scheduleSync();
+    const pending = pendingChangeCount();
+    if (
+      pending > 0 &&
+      !confirm(
+        `${pending} change(s) have not reached the cloud yet. They stay saved on this device and will sync the next time you sign in here. Sign out anyway?`,
+      )
+    ) {
+      return;
+    }
+  }
   if (supabaseClient) await supabaseClient.auth.signOut();
   currentUser = null;
   activeDataUserId = "";
@@ -1887,6 +2333,19 @@ document.querySelector("#importInput").addEventListener("change", (event) => {
 });
 
 window.addEventListener("hashchange", restoreNavFromHash);
+window.addEventListener("online", () => {
+  if (pendingChangeCount() > 0) scheduleSync();
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && pendingChangeCount() > 0) scheduleSync();
+});
+window.addEventListener("beforeunload", (event) => {
+  if (currentUser && syncInFlight && pendingChangeCount() > 0) {
+    // Queued changes survive a reload; only warn while an upload is running.
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});
 document.querySelectorAll(".nav-item").forEach((item) => {
   item.addEventListener("click", () => {
     els.navDropdown.open = false;
@@ -1896,6 +2355,59 @@ document.querySelectorAll(".nav-item").forEach((item) => {
 [els.statusFilter, els.sourceFilter, els.categoryFilter, els.followFilter, els.searchInput].forEach((input) => {
   input.addEventListener("input", renderRows);
   input.addEventListener("change", renderRows);
+});
+
+function handleStatusSelectChange(event) {
+  const select = event.target.closest("[data-status-for]");
+  if (select) changeStatus(select.dataset.statusFor, select.value);
+}
+els.rows.addEventListener("change", handleStatusSelectChange);
+els.boardView.addEventListener("change", handleStatusSelectChange);
+
+document.querySelectorAll("[data-view-mode]").forEach((button) => {
+  button.addEventListener("click", () => setPipelineView(button.dataset.viewMode));
+});
+
+els.boardView.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-edit]");
+  if (!button) return;
+  const app = applications.find((item) => item.id === button.dataset.edit);
+  if (app) openDrawer(app);
+});
+
+let draggedCardId = "";
+els.boardView.addEventListener("dragstart", (event) => {
+  const card = event.target.closest("[data-card-id]");
+  if (!card) return;
+  draggedCardId = card.dataset.cardId;
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", draggedCardId);
+  card.classList.add("dragging");
+  els.boardView.classList.add("is-dragging");
+});
+els.boardView.addEventListener("dragend", () => {
+  draggedCardId = "";
+  els.boardView.classList.remove("is-dragging");
+  els.boardView.querySelectorAll(".dragging, .drop-target").forEach((el) => el.classList.remove("dragging", "drop-target"));
+});
+els.boardView.addEventListener("dragover", (event) => {
+  const target = event.target.closest("[data-drop-status]");
+  if (!target || !draggedCardId) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "move";
+  els.boardView.querySelectorAll(".drop-target").forEach((el) => el !== target && el.classList.remove("drop-target"));
+  target.classList.add("drop-target");
+});
+els.boardView.addEventListener("dragleave", (event) => {
+  const target = event.target.closest("[data-drop-status]");
+  if (target && !target.contains(event.relatedTarget)) target.classList.remove("drop-target");
+});
+els.boardView.addEventListener("drop", (event) => {
+  const target = event.target.closest("[data-drop-status]");
+  if (!target) return;
+  event.preventDefault();
+  const id = event.dataTransfer.getData("text/plain") || draggedCardId;
+  if (id) changeStatus(id, target.dataset.dropStatus);
 });
 
 els.rows.addEventListener("click", (event) => {
@@ -1911,7 +2423,20 @@ els.rows.addEventListener("click", (event) => {
   if (app) openDrawer(app);
 });
 
+// New applications default to a follow-up one week after applying, and track
+// the applied date until the user picks a follow-up date themselves.
+document.querySelector("#appliedDate").addEventListener("change", (event) => {
+  const followUpInput = document.querySelector("#followUpDate");
+  if (followUpInput.dataset.auto === "1" && event.target.value) {
+    followUpInput.value = addDaysIso(event.target.value, 7);
+  }
+});
+document.querySelector("#followUpDate").addEventListener("input", (event) => {
+  event.target.dataset.auto = "";
+});
+
 renderFilters();
+setPipelineView(pipelineView);
 renderAll();
 restoreNavFromHash();
 initSupabase();

@@ -10,3 +10,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 .vercel
+
+# Browser extension signing key and packaged build
+*.pem
+*.crx
