@@ -633,6 +633,7 @@ function filteredApplications() {
       (follow === "due" && due !== null && due <= 0) ||
       (follow === "week" && due !== null && due >= 0 && due <= 7) ||
       (follow === "stale" && isStaleApplication(app)) ||
+      (follow === "attention" && needsAttention(app)) ||
       (follow === "none" && !app.followUpDate);
     return (
       (status === "all" || app.status === status) &&
@@ -730,10 +731,10 @@ function renderRows() {
         ? `<a class="link-out" href="${escapeHtml(app.link)}" target="_blank" rel="noreferrer">Open</a>`
         : "-";
       return `
-        <tr>
+        <tr class="clickable-row" data-row-id="${escapeHtml(app.id)}">
           <td class="actions-cell">
             <div class="row-actions">
-              <button class="edit-btn edit-btn-primary" type="button" data-edit="${app.id}">Edit</button>
+              <button class="edit-btn" type="button" data-edit="${app.id}">Edit</button>
               <button class="edit-btn" type="button" data-view="${app.id}">View</button>
             </div>
           </td>
@@ -741,7 +742,7 @@ function renderRows() {
           <td>${escapeHtml(app.role)}</td>
           <td class="cell-secondary">${escapeHtml(app.category || "Other")}</td>
           <td class="cell-secondary">${link}</td>
-          <td class="cell-secondary">${formatDate(app.appliedDate)}</td>
+          <td class="cell-secondary nowrap">${formatDate(app.appliedDate)}</td>
           <td>${followUpLabel(app)}</td>
           <td>${statusSelect(app)}</td>
           <td class="cell-secondary">${app.jobDescription ? `<button class="text-button" type="button" data-view="${app.id}">View JD</button>` : "-"}</td>
@@ -760,12 +761,13 @@ function renderRows() {
 
 function followUpLabel(app) {
   if (!app.followUpDate) return "-";
+  const date = `<span class="nowrap">${escapeHtml(app.followUpDate)}</span>`;
   const days = daysUntil(app.followUpDate);
-  if (days === null || CLOSED_STATUSES.includes(app.status)) return escapeHtml(app.followUpDate);
-  if (days < 0) return `${escapeHtml(app.followUpDate)} <span class="due-badge overdue">Overdue</span>`;
-  if (days === 0) return `${escapeHtml(app.followUpDate)} <span class="due-badge overdue">Today</span>`;
-  if (days <= 7) return `${escapeHtml(app.followUpDate)} <span class="due-badge">In ${days}d</span>`;
-  return escapeHtml(app.followUpDate);
+  if (days === null || CLOSED_STATUSES.includes(app.status)) return date;
+  if (days < 0) return `${date} <span class="due-badge overdue">Overdue</span>`;
+  if (days === 0) return `${date} <span class="due-badge overdue">Today</span>`;
+  if (days <= 7) return `${date} <span class="due-badge">In ${days}d</span>`;
+  return date;
 }
 
 // Board columns. "Closed" groups three end states; it is dropped onto via
@@ -840,11 +842,6 @@ function renderStats() {
   const offers = realApps.filter((app) => app.status === "Offer").length;
   const rejected = realApps.filter((app) => app.status === "Rejected").length;
   const closed = realApps.length - open;
-  const stale = staleApplications();
-  const dueNow = realApps.filter((app) => {
-    const days = daysUntil(app.followUpDate);
-    return days !== null && days <= 0 && !["Offer", "Rejected", "Withdrawn"].includes(app.status);
-  }).length;
   els.quickStats.innerHTML = `
     <div class="stat-row"><span>Total</span><strong>${realApps.length}</strong></div>
     <div class="stat-row"><span>Open</span><strong>${open}</strong></div>
@@ -852,7 +849,7 @@ function renderStats() {
     <div class="stat-row"><span>Offers</span><strong>${offers}</strong></div>
     <div class="stat-row"><span>Rejected</span><strong>${rejected}</strong></div>
   `;
-  if (els.attentionCount) els.attentionCount.textContent = `${stale.length + dueNow}`;
+  if (els.attentionCount) els.attentionCount.textContent = `${realApps.filter(needsAttention).length}`;
   if (els.activeCount) els.activeCount.textContent = `${realApps.length}`;
   if (els.activeSummary) els.activeSummary.textContent = `${open} open / ${closed} closed or inactive.`;
   if (els.interviewCount) els.interviewCount.textContent = `${interviews}`;
@@ -886,6 +883,12 @@ function renderStatusChart() {
           `,
           )
           .join("");
+}
+
+function needsAttention(app) {
+  if (CLOSED_STATUSES.includes(app.status)) return false;
+  const due = daysUntil(app.followUpDate);
+  return (due !== null && due <= 0) || isStaleApplication(app);
 }
 
 function isStaleApplication(app) {
@@ -1608,7 +1611,7 @@ function updateSyncStatus(message, type = "info") {
 let toastRegion = null;
 
 function showToast(message, { type = "info", action = null, duration = 5000 } = {}) {
-  if (!toastRegion) {
+  if (!toastRegion || !toastRegion.isConnected) {
     toastRegion = document.createElement("div");
     toastRegion.className = "toast-region";
     toastRegion.setAttribute("role", "status");
@@ -2517,9 +2520,19 @@ els.rows.addEventListener("click", (event) => {
     return;
   }
   const button = event.target.closest("[data-edit]");
-  if (!button) return;
-  const app = applications.find((item) => item.id === button.dataset.edit);
+  // Clicking anywhere else on a row (not a control or link) also opens it.
+  const row =
+    !button && !event.target.closest("a, button, select, input, label") && event.target.closest("[data-row-id]");
+  const id = button?.dataset.edit || (row && row.dataset.rowId);
+  if (!id) return;
+  const app = applications.find((item) => item.id === id);
   if (app) openDrawer(app);
+});
+
+document.querySelector("#attentionCard").addEventListener("click", () => {
+  els.followFilter.value = "attention";
+  renderRows();
+  document.querySelector("#applications").scrollIntoView({ behavior: "smooth", block: "start" });
 });
 
 // New applications default to a follow-up one week after applying, and track

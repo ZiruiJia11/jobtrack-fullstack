@@ -85,13 +85,14 @@ const pageMarkup = String.raw`
       </section>
       <section class="page-view" data-page="applications" id="applicationsPage">
         <section class="action-board" aria-label="Application action summary">
-          <div class="action-card action-card-primary">
+          <button class="action-card action-card-primary" id="attentionCard" type="button">
             <div>
               <span class="action-label">Needs attention</span>
               <strong id="attentionCount">0</strong>
             </div>
             <p>Follow-ups due now or applications quiet for 30+ days.</p>
-          </div>
+            <span class="action-card-link">Show them <span aria-hidden="true">&rarr;</span></span>
+          </button>
           <div class="action-card">
             <span class="action-label">Tracked applications</span>
             <strong id="activeCount">0</strong>
@@ -111,6 +112,7 @@ const pageMarkup = String.raw`
             Follow-up
             <select id="followFilter">
               <option value="all">All dates</option>
+              <option value="attention">Needs attention</option>
               <option value="due">Due now</option>
               <option value="week">Next 7 days</option>
               <option value="stale">30+ days quiet</option>
